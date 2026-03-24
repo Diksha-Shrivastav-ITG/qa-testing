@@ -34,3 +34,7 @@ class FunctionalTest(Base):
 
     # Relationship
     qa_run: Mapped[QaRun] = relationship("QaRun", back_populates="functional_tests")
+
+
+# Alias used by run_service.calculate_score
+TestStatus = FunctionalTestStatus

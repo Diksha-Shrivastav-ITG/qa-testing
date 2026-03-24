@@ -61,7 +61,7 @@ def calculate_score(db: Session, run_id: int) -> float:
 
     failed_tests = (
         db.query(func.count(FunctionalTest.id))
-        .filter(FunctionalTest.qa_run_id == run_id, FunctionalTest.status == TestStatus.failed)
+        .filter(FunctionalTest.qa_run_id == run_id, FunctionalTest.status == TestStatus.fail)
         .scalar()
         or 0
     )

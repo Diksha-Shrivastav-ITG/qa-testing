@@ -19,6 +19,16 @@ from app.services.run_service import get_next_run_number
 router = APIRouter(tags=["runs"])
 
 
+def _dispatch_qa_task(run_id: int, partial_pages: Optional[list[str]] = None) -> None:
+    """Dispatch the Celery QA task. Silently swallows errors (e.g. no broker)."""
+    try:
+        from app.workers.qa_tasks import run_qa_job
+
+        run_qa_job.delay(run_id, partial_pages)
+    except Exception:
+        pass
+
+
 def _get_project_or_404(db: Session, project_id: int) -> Project:
     project = db.query(Project).filter(Project.id == project_id).first()
     if project is None:
@@ -79,7 +89,9 @@ def start_run(
     db.commit()
     db.refresh(run)
 
-    # TODO: dispatch Celery task to execute the QA run asynchronously
+    # Dispatch Celery task to execute the QA run asynchronously
+    partial_pages = [p.strip() for p in pages.split(",") if p.strip()] if pages else None
+    _dispatch_qa_task(run.id, partial_pages)
 
     return run  # type: ignore[return-value]
 

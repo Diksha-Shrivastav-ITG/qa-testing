@@ -61,3 +61,7 @@ class Issue(Base):
 
     # Relationship
     qa_run: Mapped[QaRun] = relationship("QaRun", back_populates="issues")
+
+
+# Alias used by run_service.calculate_score
+Severity = IssueSeverity

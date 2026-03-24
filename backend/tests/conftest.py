@@ -22,6 +22,10 @@ def setup_db():
     import app.models.user  # noqa: F401
     import app.models.project  # noqa: F401
     import app.models.qa_run  # noqa: F401
+    import app.models.capture  # noqa: F401
+    import app.models.comparison  # noqa: F401
+    import app.models.issue  # noqa: F401
+    import app.models.functional_test  # noqa: F401
 
     Base.metadata.create_all(bind=_test_engine)
     yield
@@ -49,9 +53,12 @@ def _override_get_db():
 @pytest.fixture
 def client():
     """Return a TestClient with the DB dependency overridden to use SQLite."""
+    from unittest.mock import patch
+
     app.dependency_overrides[get_db] = _override_get_db
-    with TestClient(app, raise_server_exceptions=True) as c:
-        yield c
+    with patch("app.routers.runs._dispatch_qa_task"):
+        with TestClient(app, raise_server_exceptions=True) as c:
+            yield c
     app.dependency_overrides.clear()
 
 
