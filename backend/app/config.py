@@ -19,6 +19,8 @@ class Settings(BaseSettings):
 
     # Security
     secret_key: str = "change-me-to-a-random-secret-key-at-least-32-chars"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60
 
     # Admin credentials
     admin_email: str = "admin@example.com"
