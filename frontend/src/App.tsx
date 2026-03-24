@@ -1,10 +1,13 @@
 import { useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthContext } from "./hooks/useAuth";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import ProjectsPage from "./pages/ProjectsPage";
+import ProjectDetailPage from "./pages/ProjectDetailPage";
+import AppLayout from "./components/layout/AppLayout";
+import ProtectedRoute from "./components/layout/ProtectedRoute";
 
 const queryClient = new QueryClient();
 
@@ -40,11 +43,15 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route
-              path="/*"
               element={
-                isAuthenticated ? <ProjectsPage /> : <Navigate to="/login" replace />
+                <ProtectedRoute>
+                  <AppLayout />
+                </ProtectedRoute>
               }
-            />
+            >
+              <Route index element={<ProjectsPage />} />
+              <Route path="/projects/:id" element={<ProjectDetailPage />} />
+            </Route>
           </Routes>
         </BrowserRouter>
       </AuthContext.Provider>
