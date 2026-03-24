@@ -47,8 +47,10 @@ app.add_middleware(
 )
 
 from app.routers.auth import router as auth_router  # noqa: E402
+from app.routers import projects  # noqa: E402
 
 app.include_router(auth_router)
+app.include_router(projects.router)
 
 
 @app.get("/api/health", tags=["health"])

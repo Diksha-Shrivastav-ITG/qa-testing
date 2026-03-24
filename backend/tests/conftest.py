@@ -20,6 +20,7 @@ def setup_db():
     """Create all tables before each test, drop them after."""
     # Import all models so their tables are registered on Base.metadata
     import app.models.user  # noqa: F401
+    import app.models.project  # noqa: F401
 
     Base.metadata.create_all(bind=_test_engine)
     yield
