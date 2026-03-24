@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import math
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -114,3 +116,90 @@ def delete_project(
 
     db.delete(project)
     db.commit()
+
+
+@router.post("/{project_id}/discover")
+def discover_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin", "developer")),
+) -> dict:
+    """Discover pages for both Shopify and source sites, auto-map them,
+    persist mappings in project.config, and return the result."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    check_project_owner(project, current_user)
+
+    from app.engines.discovery_engine import DiscoveryEngine
+
+    engine = DiscoveryEngine()
+
+    async def _run_discovery() -> tuple[list[dict], list[dict]]:
+        shopify_pages = await engine.discover_pages(
+            project.shopify_url,
+            password=project.shopify_password,
+        )
+        if project.source_type.value == "framer":
+            source_pages = await engine.discover_framer_pages(project.source_url)
+        else:
+            # For figma or unknown source types, return empty list — no browser discovery
+            source_pages = []
+        return shopify_pages, source_pages
+
+    try:
+        shopify_pages, source_pages = asyncio.run(_run_discovery())
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Discovery failed: {exc}",
+        ) from exc
+
+    mappings = engine.auto_map(shopify_pages, source_pages)
+
+    # Persist mappings into project.config
+    config: dict[str, Any] = dict(project.config or {})
+    config["mappings"] = mappings
+    project.config = config
+    db.commit()
+    db.refresh(project)
+
+    return {
+        "shopify_pages": shopify_pages,
+        "source_pages": source_pages,
+        "mappings": mappings,
+    }
+
+
+@router.get("/{project_id}/mappings")
+def get_mappings(
+    project_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> dict:
+    """Return the stored page mappings for a project."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    return (project.config or {}).get("mappings", {})
+
+
+@router.put("/{project_id}/mappings")
+def update_mappings(
+    project_id: int,
+    payload: dict[str, str],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin", "developer")),
+) -> dict:
+    """Replace the stored page mappings for a project."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    check_project_owner(project, current_user)
+
+    config: dict[str, Any] = dict(project.config or {})
+    config["mappings"] = payload
+    project.config = config
+    db.commit()
+    db.refresh(project)
+    return config["mappings"]
