@@ -9,6 +9,7 @@ import ProjectDetailPage from "./pages/ProjectDetailPage";
 import RunDetailPage from "./pages/RunDetailPage";
 import AppLayout from "./components/layout/AppLayout";
 import ProtectedRoute from "./components/layout/ProtectedRoute";
+import UserManagementPage from "./pages/UserManagementPage";
 
 const queryClient = new QueryClient();
 
@@ -53,6 +54,7 @@ function App() {
               <Route index element={<ProjectsPage />} />
               <Route path="/projects/:id" element={<ProjectDetailPage />} />
               <Route path="/runs/:id" element={<RunDetailPage />} />
+              <Route path="/admin/users" element={<UserManagementPage />} />
             </Route>
           </Routes>
         </BrowserRouter>
