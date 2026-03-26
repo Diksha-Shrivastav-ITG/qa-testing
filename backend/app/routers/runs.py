@@ -74,7 +74,7 @@ def start_run(
     pages: Optional[str] = Query(default=None, description="Comma-separated page slugs"),
     test_mode: str = Query(default="design", description="'design' = compare vs Framer/Figma, 'ai' = AI-only analysis"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin", "developer", "pm")),
+    current_user: User = Depends(require_role("admin", "developer")),
 ) -> RunResponse:
     """Start a new QA run for a project. Returns 409 if a run is already in progress."""
     project = _get_project_or_404(db, project_id)

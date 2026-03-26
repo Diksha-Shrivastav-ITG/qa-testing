@@ -30,7 +30,7 @@ def check_project_owner(project: Project, user: User) -> None:
 def create_project(
     payload: ProjectCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin", "developer", "pm")),
+    current_user: User = Depends(require_role("admin", "developer")),
 ) -> ProjectResponse:
     project = Project(
         name=payload.name,
@@ -138,7 +138,7 @@ def delete_project(
 def discover_project(
     project_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin", "developer", "pm")),
+    current_user: User = Depends(require_role("admin", "developer")),
 ) -> dict:
     """Discover pages for both Shopify and source sites, auto-map them,
     persist mappings in project.config, and return the result."""
@@ -205,7 +205,7 @@ def update_mappings(
     project_id: int,
     payload: dict[str, str],
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin", "developer", "pm")),
+    current_user: User = Depends(require_role("admin", "developer")),
 ) -> dict:
     """Replace the stored page mappings for a project."""
     project = db.query(Project).filter(Project.id == project_id).first()

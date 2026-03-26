@@ -6,7 +6,7 @@ const SignupForm = () => {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("developer");
+  const role = "developer";
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -75,33 +75,7 @@ const SignupForm = () => {
         />
       </div>
 
-      <div>
-        <span className="block text-sm font-medium text-gray-700 mb-2">Role</span>
-        <div className="flex gap-6">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="radio"
-              name="role"
-              value="developer"
-              checked={role === "developer"}
-              onChange={(e) => setRole(e.target.value)}
-              className="accent-blue-600"
-            />
-            <span className="text-sm text-gray-700">Developer</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="radio"
-              name="role"
-              value="pm"
-              checked={role === "pm"}
-              onChange={(e) => setRole(e.target.value)}
-              className="accent-blue-600"
-            />
-            <span className="text-sm text-gray-700">Project Manager</span>
-          </label>
-        </div>
-      </div>
+      {/* Role is always developer for signup — admins are created manually */}
 
       {error && <p className="text-red-600 text-sm mt-1">{error}</p>}
 
