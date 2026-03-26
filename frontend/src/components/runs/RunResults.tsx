@@ -896,6 +896,7 @@ const RunResults = ({ runId }: RunResultsProps) => {
       {/* Prompt Builder Modal */}
       {showPromptBuilder && (
         <PromptBuilder
+          runId={runId}
           issues={issues}
           accItems={accItems}
           projectName={projectData?.name}
