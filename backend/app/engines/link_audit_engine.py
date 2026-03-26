@@ -60,6 +60,49 @@ _AUDIT_JS = """
         });
     });
 
+    // ── Helper: find parent section/context for an element ──────────
+    function getContext(el) {
+        // Walk up to find a meaningful parent section
+        let parent = el.parentElement;
+        let sectionName = '';
+        let depth = 0;
+        while (parent && depth < 10) {
+            // Check for common section identifiers
+            const tag = parent.tagName.toLowerCase();
+            const id = parent.id || '';
+            const cls = parent.className || '';
+            const ariaLbl = parent.getAttribute('aria-label') || '';
+            const dataSection = parent.getAttribute('data-section-type') || parent.getAttribute('data-section-id') || '';
+
+            if (dataSection) { sectionName = 'Section: ' + dataSection; break; }
+            if (ariaLbl) { sectionName = ariaLbl; break; }
+            if (tag === 'header') { sectionName = 'Header'; break; }
+            if (tag === 'footer') { sectionName = 'Footer'; break; }
+            if (tag === 'nav') { sectionName = 'Navigation'; break; }
+            if (tag === 'main') { sectionName = 'Main content'; break; }
+            if (tag === 'form') {
+                const action = parent.getAttribute('action') || '';
+                sectionName = 'Form' + (action ? ' (' + action + ')' : '');
+                break;
+            }
+            if (id && !id.startsWith('shopify')) { sectionName = '#' + id; break; }
+
+            parent = parent.parentElement;
+            depth++;
+        }
+
+        // Get position on page
+        const rect = el.getBoundingClientRect();
+        const scrollY = window.scrollY;
+        const yPos = Math.round(rect.top + scrollY);
+        let position = '';
+        if (yPos < 200) position = 'Top of page';
+        else if (yPos < window.innerHeight) position = 'Above the fold';
+        else position = 'Below the fold (~' + yPos + 'px from top)';
+
+        return { sectionName, position };
+    }
+
     // ── Audit all <button> tags ──────────────────────────────────────
     document.querySelectorAll('button').forEach(btn => {
         const text = (btn.textContent || '').replace(/\\s+/g, ' ').trim().substring(0, 120);
@@ -68,6 +111,9 @@ _AUDIT_JS = """
         const type = btn.getAttribute('type') || 'submit';
         const hasIcon = !!(btn.querySelector('svg,img,i,.icon'));
         const displayText = text || ariaLabel || title || (hasIcon ? '[icon button]' : '');
+
+        // Get context about where this button is
+        const ctx = getContext(btn);
 
         // Determine what this button does
         let destination = null;
@@ -84,11 +130,20 @@ _AUDIT_JS = """
         let issue = null;
         if (!displayText) issue = 'no_accessible_name';
 
+        // Build a descriptive text for buttons without names
+        let finalText = displayText;
+        if (!displayText || displayText === '[no accessible name]') {
+            const parts = [];
+            if (ctx.sectionName) parts.push('in ' + ctx.sectionName);
+            if (ctx.position) parts.push(ctx.position);
+            finalText = '[unnamed button' + (parts.length ? ' — ' + parts.join(', ') : '') + ']';
+        }
+
         items.push({
             element_type: 'button',
-            text: displayText || '[no accessible name]',
+            text: finalText,
             href: null,
-            destination: destination,
+            destination: destination + (ctx.sectionName ? ' | Location: ' + ctx.sectionName : '') + (ctx.position ? ' | ' + ctx.position : ''),
             is_external: false,
             is_mail_or_tel: false,
             has_href: false,
