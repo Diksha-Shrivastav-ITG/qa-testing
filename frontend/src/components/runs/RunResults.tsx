@@ -102,12 +102,6 @@ const pageLabel = (p: string) => {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
-const issueScreenshotUrl = (path?: string) => {
-  if (!path) return null;
-  const cleaned = path.replace(/^\/app\/storage\//, "");
-  return `${BACKEND}/storage/${cleaned}`;
-};
-
 const captureUrl = (imageUrl: string | null) => {
   if (!imageUrl) return undefined;
   return `${BACKEND}${imageUrl}`;
@@ -183,7 +177,6 @@ interface IssueCardProps {
 
 const IssueCard = ({ issue, num }: IssueCardProps) => {
   const [expanded, setExpanded] = useState(false);
-  const screenshot = issueScreenshotUrl(issue.screenshot_path);
 
   return (
     <div
@@ -204,7 +197,7 @@ const IssueCard = ({ issue, num }: IssueCardProps) => {
         <div className="min-w-0 flex-1">
           <p className="text-sm text-gray-800">{issue.description}</p>
           {issue.element_selector && (
-            <p className="text-xs text-gray-400 mt-0.5 font-mono truncate">
+            <p className="text-xs text-gray-400 mt-0.5 truncate">
               {issue.element_selector}
             </p>
           )}
@@ -217,20 +210,11 @@ const IssueCard = ({ issue, num }: IssueCardProps) => {
             )}
           </div>
 
-          {expanded && (
-            <div className="mt-3 space-y-2">
-              {issue.ai_suggestion && (
-                <div className="text-xs bg-blue-50 text-blue-700 px-3 py-2 rounded">
-                  <strong>AI Suggestion:</strong> {issue.ai_suggestion}
-                </div>
-              )}
-              {screenshot && (
-                <img
-                  src={screenshot}
-                  alt="Issue screenshot"
-                  className="max-h-48 rounded border border-gray-200"
-                />
-              )}
+          {expanded && issue.ai_suggestion && (
+            <div className="mt-3">
+              <div className="text-xs bg-blue-50 text-blue-700 px-3 py-2 rounded">
+                <strong>AI Suggestion:</strong> {issue.ai_suggestion}
+              </div>
             </div>
           )}
         </div>
