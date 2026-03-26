@@ -75,3 +75,69 @@ def update_me(
     db.commit()
     db.refresh(current_user)
     return current_user
+
+
+# ---------------------------------------------------------------------------
+# Admin endpoints
+# ---------------------------------------------------------------------------
+
+from app.deps import require_role
+from typing import Optional
+from fastapi import Query
+
+
+@router.get("/api/users", response_model=list[UserResponse])
+def list_users(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_role("admin")),
+) -> list[User]:
+    """List all users. Admin only."""
+    return db.query(User).order_by(User.id.asc()).all()
+
+
+class AdminUpdateUserRequest(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+
+
+@router.patch("/api/users/{user_id}", response_model=UserResponse)
+def admin_update_user(
+    user_id: int,
+    body: AdminUpdateUserRequest,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_role("admin")),
+) -> User:
+    """Update a user's name or role. Admin only."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if body.name is not None:
+        user.name = body.name
+    if body.role is not None:
+        try:
+            user.role = UserRole(body.role)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid role: {body.role}")
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.delete("/api/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_role("admin")),
+) -> None:
+    """Delete a user. Admin only. Cannot delete yourself."""
+    if user_id == admin_user.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete yourself")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    db.delete(user)
+    db.commit()
