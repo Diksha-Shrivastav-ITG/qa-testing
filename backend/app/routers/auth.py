@@ -11,7 +11,7 @@ from app.services.auth_service import create_access_token, hash_password, verify
 
 router = APIRouter()
 
-_ALLOWED_SIGNUP_ROLES = {"developer", "pm"}
+_ALLOWED_SIGNUP_ROLES = {"developer"}
 
 
 @router.post("/api/auth/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
