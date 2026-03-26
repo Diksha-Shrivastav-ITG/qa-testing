@@ -1,0 +1,46 @@
+# Environment files (contain secrets)
+.env
+*.env
+backend/.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Node
+node_modules/
+.next/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Storage (screenshots, reports)
+storage/
+
+# Database
+*.db
+*.sqlite3
+
+# Docker
+docker-compose.override.yml
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Claude
+.claude/
