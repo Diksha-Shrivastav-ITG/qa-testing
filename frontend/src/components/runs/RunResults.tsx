@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getRun, getCaptures, getAccessibility, getLinkAudit } from "../../api/runs";
 import { listIssues } from "../../api/issues";
 import { getProject } from "../../api/projects";
+import PromptBuilder from "./PromptBuilder";
 
 // ---------- Types ----------
 
@@ -721,6 +722,8 @@ interface RunResultsProps {
 }
 
 const RunResults = ({ runId }: RunResultsProps) => {
+  const [showPromptBuilder, setShowPromptBuilder] = useState(false);
+
   // ---------- Data fetching ----------
 
   const {
@@ -841,9 +844,22 @@ const RunResults = ({ runId }: RunResultsProps) => {
             <strong className="text-gray-800">{issues.length}</strong>
           </span>
         </div>
-        <div className="flex items-center gap-2 text-xs text-gray-400">
-          Showing all {issues.length} issues across {pagesWithIssues.length}{" "}
-          page{pagesWithIssues.length !== 1 ? "s" : ""}
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-400">
+            Showing all {issues.length} issues across {pagesWithIssues.length}{" "}
+            page{pagesWithIssues.length !== 1 ? "s" : ""}
+          </span>
+          {issues.length > 0 && (
+            <button
+              onClick={() => setShowPromptBuilder(true)}
+              className="px-3 py-1.5 text-xs font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors flex items-center gap-1.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              Generate Fix Prompt
+            </button>
+          )}
         </div>
       </div>
 
@@ -875,6 +891,17 @@ const RunResults = ({ runId }: RunResultsProps) => {
           <p className="text-lg font-medium">No issues found</p>
           <p className="text-sm mt-1">Your site looks great!</p>
         </div>
+      )}
+
+      {/* Prompt Builder Modal */}
+      {showPromptBuilder && (
+        <PromptBuilder
+          issues={issues}
+          accItems={accItems}
+          projectName={projectData?.name}
+          shopifyUrl={projectData?.shopify_url}
+          onClose={() => setShowPromptBuilder(false)}
+        />
       )}
     </div>
   );

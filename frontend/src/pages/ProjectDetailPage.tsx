@@ -21,7 +21,23 @@ interface Project {
   source_url: string;
 }
 
-type Tab = "runs" | "settings";
+type Tab = "runs" | "test-cases" | "settings";
+
+const TEST_CASES = [
+  { id: "visual_ai", label: "Visual AI Analysis", desc: "AI reviews each page for layout, spacing, color, and design issues", category: "Visual", default: true },
+  { id: "visual_comparison", label: "Design Comparison (SSIM)", desc: "Pixel-level comparison between Framer/Figma design and Shopify", category: "Visual", default: true },
+  { id: "functional_add_to_cart", label: "Add to Cart Flow", desc: "Test that users can add products to cart and cart updates", category: "Functional", default: true },
+  { id: "functional_checkout", label: "Checkout Flow", desc: "Test that users can reach the checkout page", category: "Functional", default: true },
+  { id: "functional_search", label: "Search Functionality", desc: "Test search opens, accepts input, and shows results", category: "Functional", default: true },
+  { id: "functional_mobile_menu", label: "Mobile Menu", desc: "Test hamburger menu opens and shows navigation", category: "Functional", default: true },
+  { id: "functional_collection_filter", label: "Collection Filters", desc: "Test that filters update the product grid", category: "Functional", default: false },
+  { id: "functional_newsletter", label: "Newsletter Signup", desc: "Verify email signup form exists and is functional", category: "Functional", default: true },
+  { id: "link_check", label: "Broken Link Check", desc: "Check all links for 404s and broken URLs", category: "Links & Buttons", default: true },
+  { id: "image_check", label: "Broken Image Check", desc: "Check all images for missing sources and alt text", category: "Links & Buttons", default: true },
+  { id: "link_audit", label: "Link & Button Audit", desc: "Audit all links and buttons for navigation, href, and accessibility", category: "Links & Buttons", default: true },
+  { id: "ada_compliance", label: "ADA / WCAG Compliance", desc: "Check for accessibility issues: alt text, ARIA labels, contrast, form labels", category: "Accessibility", default: true },
+  { id: "ada_contrast", label: "Color Contrast Check", desc: "Verify text has sufficient contrast against backgrounds (WCAG AA)", category: "Accessibility", default: true },
+];
 
 const statusColor = (status: string) => {
   switch (status) {
@@ -48,6 +64,19 @@ const ProjectDetailPage = () => {
   const [settingsForm, setSettingsForm] = useState<Partial<Project>>({});
   const [editMode, setEditMode] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
+  const [enabledTests, setEnabledTests] = useState<Set<string>>(
+    () => new Set(TEST_CASES.filter(t => t.default).map(t => t.id))
+  );
+
+  const toggleTest = (id: string) => {
+    setEnabledTests(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const testCategories = [...new Set(TEST_CASES.map(t => t.category))];
 
   const {
     data: project,
@@ -159,17 +188,21 @@ const ProjectDetailPage = () => {
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-6">
-          {(["runs", "settings"] as Tab[]).map((tab) => (
+          {([
+            { key: "runs", label: "Runs" },
+            { key: "test-cases", label: "Test Cases" },
+            { key: "settings", label: "Settings" },
+          ] as { key: Tab; label: string }[]).map((tab) => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`pb-3 text-sm font-medium capitalize border-b-2 transition-colors ${
-                activeTab === tab
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab.key
                   ? "border-indigo-600 text-indigo-600"
                   : "border-transparent text-gray-500 hover:text-gray-700"
               }`}
             >
-              {tab}
+              {tab.label}
             </button>
           ))}
         </nav>
@@ -238,6 +271,75 @@ const ProjectDetailPage = () => {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Test Cases Tab */}
+      {activeTab === "test-cases" && (
+        <div className="max-w-2xl">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Test Configuration</h2>
+            <p className="text-sm text-gray-500 mt-1">Select which tests to run when you start a QA run for this project.</p>
+          </div>
+
+          <div className="space-y-6">
+            {testCategories.map(cat => (
+              <div key={cat} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className="px-5 py-3 bg-gray-50 border-b border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-700">{cat}</h3>
+                </div>
+                <div className="divide-y divide-gray-50">
+                  {TEST_CASES.filter(t => t.category === cat).map(test => (
+                    <label
+                      key={test.id}
+                      className="flex items-start gap-4 px-5 py-4 hover:bg-gray-50 cursor-pointer transition-colors"
+                    >
+                      <div className="pt-0.5">
+                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                          enabledTests.has(test.id)
+                            ? "bg-indigo-600 border-indigo-600"
+                            : "border-gray-300"
+                        }`}>
+                          {enabledTests.has(test.id) && (
+                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex-1" onClick={() => toggleTest(test.id)}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-900">{test.label}</span>
+                          {enabledTests.has(test.id) && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">ON</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-0.5">{test.desc}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-6 flex items-center gap-3">
+            <button
+              onClick={() => setEnabledTests(new Set(TEST_CASES.map(t => t.id)))}
+              className="px-4 py-2 text-sm font-medium text-indigo-600 border border-indigo-300 rounded-lg hover:bg-indigo-50 transition-colors"
+            >
+              Enable All
+            </button>
+            <button
+              onClick={() => setEnabledTests(new Set())}
+              className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Disable All
+            </button>
+            <span className="text-xs text-gray-400 ml-2">
+              {enabledTests.size} of {TEST_CASES.length} tests enabled
+            </span>
+          </div>
         </div>
       )}
 

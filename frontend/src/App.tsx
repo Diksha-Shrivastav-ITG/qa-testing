@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthContext } from "./hooks/useAuth";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
+import DashboardPage from "./pages/DashboardPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import ProjectDetailPage from "./pages/ProjectDetailPage";
 import RunDetailPage from "./pages/RunDetailPage";
@@ -51,7 +52,8 @@ function App() {
                 </ProtectedRoute>
               }
             >
-              <Route index element={<ProjectsPage />} />
+              <Route index element={<DashboardPage />} />
+              <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/projects/:id" element={<ProjectDetailPage />} />
               <Route path="/runs/:id" element={<RunDetailPage />} />
               <Route path="/admin/users" element={<UserManagementPage />} />
