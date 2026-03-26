@@ -235,37 +235,24 @@ class CaptureEngine:
 
             # Handle password-protected Shopify stores
             if password:
-                # Extract the base store URL (without preview params)
-                from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
+                from urllib.parse import urlparse
                 parsed = urlparse(url)
                 base_store = f"{parsed.scheme}://{parsed.netloc}"
 
-                # First go to the password page
+                # Go to password page first, enter the store password
                 try:
                     await page.goto(f"{base_store}/password", wait_until="networkidle", timeout=20000)
                     pwd_input = page.locator("input[type='password']")
                     if await pwd_input.is_visible(timeout=3000):
                         await pwd_input.fill(password)
-                        submit = page.locator("button[type='submit'], input[type='submit']")
-                        await submit.click()
+                        await page.locator("button[type='submit'], input[type='submit']").click()
                         await page.wait_for_load_state("networkidle")
+                        await asyncio.sleep(1)
                 except Exception:
-                    pass  # Store might not be password-protected after all
+                    pass
 
-            # Navigate to target URL (strip preview_theme_id to avoid Shopify preview issues)
-            clean_url = url
-            if "preview_theme_id=" in url:
-                # Strip preview_theme_id — it requires admin session and often fails
-                from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-                p = urlparse(url)
-                params = parse_qs(p.query)
-                # Remove preview-related params
-                for key in ["preview_theme_id", "_bt", "_ab", "_fd", "_sc", "key"]:
-                    params.pop(key, None)
-                clean_query = urlencode(params, doseq=True)
-                clean_url = urlunparse((p.scheme, p.netloc, p.path, p.params, clean_query, p.fragment))
-
-            await page.goto(clean_url, wait_until="networkidle", timeout=30000)
+            # Navigate to the FULL target URL (keep preview_theme_id and all params)
+            await page.goto(url, wait_until="networkidle", timeout=30000)
 
             # Inject cleanup CSS to suppress UI noise
             await page.add_style_tag(content=CLEANUP_CSS)

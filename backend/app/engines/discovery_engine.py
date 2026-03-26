@@ -62,17 +62,8 @@ class DiscoveryEngine:
             except Exception:
                 pass
 
-        # Strip preview_theme_id if present (requires admin session)
-        clean_url = url
-        if "preview_theme_id=" in url:
-            from urllib.parse import urlparse as up2, parse_qs, urlencode, urlunparse
-            p = up2(url)
-            params = parse_qs(p.query)
-            for k in ["preview_theme_id", "_bt", "_ab", "_fd", "_sc", "key"]:
-                params.pop(k, None)
-            clean_url = urlunparse((p.scheme, p.netloc, p.path, p.params, urlencode(params, doseq=True), p.fragment))
-
-        await page.goto(clean_url, wait_until="networkidle", timeout=30000)
+        # Navigate to the full URL (keep preview_theme_id for unpublished theme testing)
+        await page.goto(url, wait_until="networkidle", timeout=30000)
         return page
 
     # ------------------------------------------------------------------

@@ -154,15 +154,19 @@ class AccessibilityEngine:
 
             # Handle password-protected stores
             if password:
+                from urllib.parse import urlparse
+                base_store = f"{urlparse(page_url).scheme}://{urlparse(page_url).netloc}"
                 try:
-                    await page.goto(page_url, wait_until="networkidle")
-                    await page.fill("input[type='password']", password)
-                    await page.click("button[type='submit'], input[type='submit']")
-                    await page.wait_for_load_state("networkidle")
+                    await page.goto(f"{base_store}/password", wait_until="networkidle", timeout=20000)
+                    pwd_input = page.locator("input[type='password']")
+                    if await pwd_input.is_visible(timeout=3000):
+                        await pwd_input.fill(password)
+                        await page.locator("button[type='submit'], input[type='submit']").click()
+                        await page.wait_for_load_state("networkidle")
                 except Exception:
                     pass
 
-            await page.goto(page_url, wait_until="networkidle")
+            await page.goto(page_url, wait_until="networkidle", timeout=30000)
             await asyncio.sleep(2)
 
             # Try axe-core first
