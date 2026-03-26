@@ -33,12 +33,24 @@ class DiscoveryEngine:
         patched with AsyncMock easily.
         """
         pw = await async_playwright().start()
-        browser = await pw.chromium.launch(headless=True)
-        context = await browser.new_context()
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        context = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+        )
+        await context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        )
         page = await context.new_page()
 
         if password:
-            await page.goto(url, wait_until="networkidle")
+            await page.goto(url, wait_until="networkidle", timeout=30000)
             try:
                 await page.fill("input[type='password']", password)
                 await page.click("button[type='submit'], input[type='submit']")
@@ -46,7 +58,7 @@ class DiscoveryEngine:
             except Exception:
                 pass
 
-        await page.goto(url, wait_until="networkidle")
+        await page.goto(url, wait_until="networkidle", timeout=30000)
         return page
 
     # ------------------------------------------------------------------

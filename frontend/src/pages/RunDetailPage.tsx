@@ -7,9 +7,10 @@ import RunResults from "../components/runs/RunResults";
 interface Run {
   id: number;
   status: string;
-  score?: number;
+  overall_score?: number;
   project_id?: number;
-  created_at: string;
+  started_at: string;
+  run_number?: number;
 }
 
 const RunDetailPage = () => {
@@ -28,6 +29,7 @@ const RunDetailPage = () => {
     enabled: !!runId,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
+      // Poll every 5s while running — ensures UI updates even if SSE disconnects
       return status === "running" || status === "pending" ? 5000 : false;
     },
   });
@@ -41,7 +43,8 @@ const RunDetailPage = () => {
 
   const handleDownload = (format: "pdf" | "html") => {
     const token = localStorage.getItem("token");
-    const url = `http://localhost:8000/api/runs/${runId}/report.${format}${
+    const endpoint = format === "pdf" ? "pdf" : "html";
+    const url = `http://localhost:8000/api/runs/${runId}/report/${endpoint}${
       token ? `?token=${encodeURIComponent(token)}` : ""
     }`;
     window.open(url, "_blank");
@@ -83,10 +86,10 @@ const RunDetailPage = () => {
           >
             &larr; Back
           </button>
-          <h1 className="text-2xl font-bold text-gray-900">Run #{run.id}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Run #{run.run_number ?? run.id}</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             Started{" "}
-            {new Date(run.created_at).toLocaleDateString("en-US", {
+            {new Date(run.started_at).toLocaleDateString("en-US", {
               year: "numeric",
               month: "short",
               day: "numeric",

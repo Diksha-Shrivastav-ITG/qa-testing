@@ -16,14 +16,18 @@ def calculate_score(db: Session, run_id: int) -> float:
     """Calculate overall score for a run.
 
     Formula:
-        base_score = avg(SSIM) * 100
+        AI mode:     base = 100
+        Design mode: base = avg(SSIM) * 100
         penalty = critical*5 + major*2 + minor*0.5
         functional_penalty = failed_tests * 3
-        score = max(0, base_score - penalty - functional_penalty)
+        score = max(0, base - penalty - functional_penalty)
     """
     from app.models.comparison import Comparison
-    from app.models.functional_test import FunctionalTest
-    from app.models.issue import Issue
+    from app.models.functional_test import FunctionalTest, FunctionalTestStatus
+    from app.models.issue import Issue, IssueSeverity
+
+    run = db.query(QaRun).filter(QaRun.id == run_id).first()
+    test_mode = run.test_mode if run else "design"
 
     # Average SSIM across comparisons for this run
     avg_ssim = (
@@ -31,41 +35,38 @@ def calculate_score(db: Session, run_id: int) -> float:
         .filter(Comparison.qa_run_id == run_id)
         .scalar()
     )
-    base_score = float(avg_ssim or 0.0) * 100
+
+    # In AI mode or when no valid SSIM data, start from 100
+    if test_mode == "ai" or avg_ssim is None or float(avg_ssim) < 0.01:
+        base_score = 100.0
+    else:
+        base_score = float(avg_ssim) * 100
 
     # Issue penalties
-    from app.models.issue import Severity  # type: ignore[attr-defined]
-
     critical_count = (
         db.query(func.count(Issue.id))
-        .filter(Issue.qa_run_id == run_id, Issue.severity == Severity.critical)
-        .scalar()
-        or 0
+        .filter(Issue.qa_run_id == run_id, Issue.severity == IssueSeverity.critical)
+        .scalar() or 0
     )
     major_count = (
         db.query(func.count(Issue.id))
-        .filter(Issue.qa_run_id == run_id, Issue.severity == Severity.major)
-        .scalar()
-        or 0
+        .filter(Issue.qa_run_id == run_id, Issue.severity == IssueSeverity.major)
+        .scalar() or 0
     )
     minor_count = (
         db.query(func.count(Issue.id))
-        .filter(Issue.qa_run_id == run_id, Issue.severity == Severity.minor)
-        .scalar()
-        or 0
+        .filter(Issue.qa_run_id == run_id, Issue.severity == IssueSeverity.minor)
+        .scalar() or 0
     )
     penalty = critical_count * 5 + major_count * 2 + minor_count * 0.5
 
     # Functional test penalty
-    from app.models.functional_test import TestStatus  # type: ignore[attr-defined]
-
     failed_tests = (
         db.query(func.count(FunctionalTest.id))
-        .filter(FunctionalTest.qa_run_id == run_id, FunctionalTest.status == TestStatus.fail)
-        .scalar()
-        or 0
+        .filter(FunctionalTest.qa_run_id == run_id, FunctionalTest.status == FunctionalTestStatus.fail)
+        .scalar() or 0
     )
     functional_penalty = failed_tests * 3
 
     score = max(0.0, base_score - penalty - functional_penalty)
-    return score
+    return round(score, 1)

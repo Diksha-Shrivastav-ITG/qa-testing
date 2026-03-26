@@ -1,14 +1,16 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getProject, updateProject } from "../api/projects";
 import { listRuns, startRun } from "../api/runs";
+import RunQAModal from "../components/runs/RunQAModal";
 
 interface Run {
   id: number;
   status: string;
-  score?: number;
+  overall_score?: number;
   created_at: string;
+  run_number?: number;
 }
 
 interface Project {
@@ -45,6 +47,7 @@ const ProjectDetailPage = () => {
   const [activeTab, setActiveTab] = useState<Tab>("runs");
   const [settingsForm, setSettingsForm] = useState<Partial<Project>>({});
   const [editMode, setEditMode] = useState(false);
+  const [showRunModal, setShowRunModal] = useState(false);
 
   const {
     data: project,
@@ -63,12 +66,16 @@ const ProjectDetailPage = () => {
     queryKey: ["runs", projectId],
     queryFn: () => listRuns(projectId, 1).then((res) => res.data),
     enabled: !!projectId,
+    refetchInterval: 10000,
   });
 
   const runMutation = useMutation({
-    mutationFn: () => startRun(projectId),
-    onSuccess: () => {
+    mutationFn: ({ pages, testMode }: { pages: string; testMode: "design" | "ai" }) =>
+      startRun(projectId, pages || undefined, testMode),
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["runs", projectId] });
+      setShowRunModal(false);
+      navigate(`/runs/${res.data.id}`);
     },
   });
 
@@ -81,7 +88,8 @@ const ProjectDetailPage = () => {
     },
   });
 
-  const runs: Run[] = runsData?.runs ?? runsData ?? [];
+  const runs: Run[] = runsData?.items ?? [];
+  const activeRun = runs.find((r) => r.status === "running" || r.status === "pending");
 
   if (projectLoading) {
     return (
@@ -120,14 +128,33 @@ const ProjectDetailPage = () => {
         </div>
         {activeTab === "runs" && (
           <button
-            onClick={() => runMutation.mutate()}
-            disabled={runMutation.isPending}
+            onClick={() => setShowRunModal(true)}
+            disabled={!!activeRun || runMutation.isPending}
             className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+            title={activeRun ? "A run is already in progress" : ""}
           >
             {runMutation.isPending ? "Starting..." : "Run QA"}
           </button>
         )}
       </div>
+
+      {/* Active run banner */}
+      {activeRun && (
+        <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse" />
+            <span className="text-sm font-medium text-blue-800">
+              QA Run #{activeRun.id} is in progress...
+            </span>
+          </div>
+          <Link
+            to={`/runs/${activeRun.id}`}
+            className="text-sm font-medium text-blue-600 hover:text-blue-800 underline"
+          >
+            View Progress →
+          </Link>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
@@ -161,7 +188,7 @@ const ProjectDetailPage = () => {
                 Start your first QA run to see results here.
               </p>
               <button
-                onClick={() => runMutation.mutate()}
+                onClick={() => setShowRunModal(true)}
                 disabled={runMutation.isPending}
                 className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors"
               >
@@ -172,35 +199,42 @@ const ProjectDetailPage = () => {
           {!runsLoading && runs.length > 0 && (
             <div className="space-y-3">
               {runs.map((run: Run) => (
-                <div
+                <Link
                   key={run.id}
-                  className="bg-white border border-gray-200 rounded-lg p-4 flex items-center justify-between"
+                  to={`/runs/${run.id}`}
+                  className="block bg-white border border-gray-200 rounded-lg p-4 hover:border-indigo-300 hover:shadow-sm transition-all"
                 >
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm font-medium text-gray-900">
-                      Run #{run.id}
-                    </span>
-                    <span
-                      className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${statusColor(run.status)}`}
-                    >
-                      {run.status}
-                    </span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <span className="text-sm font-medium text-gray-900">
+                        Run #{run.run_number ?? run.id}
+                      </span>
+                      <span
+                        className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${statusColor(run.status)}`}
+                      >
+                        {run.status}
+                        {(run.status === "running" || run.status === "pending") && (
+                          <span className="ml-1 inline-block w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse align-middle" />
+                        )}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-6 text-sm text-gray-500">
+                      {run.overall_score !== undefined && run.overall_score !== null && (
+                        <span className="font-medium text-gray-700">Score: {Math.round(run.overall_score)}%</span>
+                      )}
+                      <span>
+                        {new Date(run.created_at).toLocaleDateString("en-US", {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      <span className="text-indigo-500 text-xs">View →</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-6 text-sm text-gray-500">
-                    {run.score !== undefined && run.score !== null && (
-                      <span>Score: {Math.round(run.score)}%</span>
-                    )}
-                    <span>
-                      {new Date(run.created_at).toLocaleDateString("en-US", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                  </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}
@@ -300,6 +334,15 @@ const ProjectDetailPage = () => {
             </form>
           )}
         </div>
+      )}
+
+      {/* Run QA Modal */}
+      {showRunModal && (
+        <RunQAModal
+          onConfirm={(pages, testMode) => runMutation.mutate({ pages, testMode })}
+          onCancel={() => setShowRunModal(false)}
+          isLoading={runMutation.isPending}
+        />
       )}
     </div>
   );

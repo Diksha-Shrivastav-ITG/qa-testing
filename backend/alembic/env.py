@@ -29,7 +29,7 @@ import app.models  # noqa: E402 – ensures all models are registered on Base.me
 config = context.config
 
 # Override the sqlalchemy.url from settings so we never hard-code credentials.
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:

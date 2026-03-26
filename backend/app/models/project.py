@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 class SourceType(str, enum.Enum):
     framer = "framer"
     figma = "figma"
+    none = "none"
 
 
 class Project(Base):
@@ -28,7 +29,7 @@ class Project(Base):
         Enum(SourceType, name="sourcetype"),
         nullable=False,
     )
-    source_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    source_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     # Nullable encrypted credential fields
     shopify_password: Mapped[str | None] = mapped_column(String(1024), nullable=True)

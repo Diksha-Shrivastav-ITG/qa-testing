@@ -12,7 +12,10 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user, require_role
+from app.models.accessibility_result import AccessibilityResult
+from app.models.capture import Capture
 from app.models.issue import Issue
+from app.models.link_audit import LinkAudit
 from app.models.project import Project
 from app.models.qa_run import QaRun, RunStatus
 from app.models.user import User
@@ -24,12 +27,16 @@ from app.services.run_service import get_next_run_number
 router = APIRouter(tags=["runs"])
 
 
-def _dispatch_qa_task(run_id: int, partial_pages: Optional[list[str]] = None) -> None:
+def _dispatch_qa_task(
+    run_id: int,
+    partial_pages: Optional[list[str]] = None,
+    test_mode: str = "design",
+) -> None:
     """Dispatch the Celery QA task. Silently swallows errors (e.g. no broker)."""
     try:
         from app.workers.qa_tasks import run_qa_job
 
-        run_qa_job.delay(run_id, partial_pages)
+        run_qa_job.delay(run_id, partial_pages, test_mode)
     except Exception:
         pass
 
@@ -65,8 +72,9 @@ def start_run(
     project_id: int,
     partial: bool = Query(default=False),
     pages: Optional[str] = Query(default=None, description="Comma-separated page slugs"),
+    test_mode: str = Query(default="design", description="'design' = compare vs Framer/Figma, 'ai' = AI-only analysis"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin", "developer")),
+    current_user: User = Depends(require_role("admin", "developer", "pm")),
 ) -> RunResponse:
     """Start a new QA run for a project. Returns 409 if a run is already in progress."""
     project = _get_project_or_404(db, project_id)
@@ -96,7 +104,7 @@ def start_run(
 
     # Dispatch Celery task to execute the QA run asynchronously
     partial_pages = [p.strip() for p in pages.split(",") if p.strip()] if pages else None
-    _dispatch_qa_task(run.id, partial_pages)
+    _dispatch_qa_task(run.id, partial_pages, test_mode)
 
     return run  # type: ignore[return-value]
 
@@ -167,6 +175,7 @@ def cancel_run(
 @router.delete(
     "/api/projects/{project_id}/runs/{run_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
 )
 def delete_run(
     project_id: int,
@@ -194,6 +203,33 @@ def delete_run(
     db.commit()
 
 
+@router.get("/api/runs/{run_id}/captures")
+def get_run_captures(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list:
+    """Return all captures for a run with image URLs."""
+    _get_run_or_404(db, run_id)
+    from app.config import settings
+    captures = db.query(Capture).filter(Capture.qa_run_id == run_id).order_by(Capture.page, Capture.breakpoint).all()
+    storage_base = settings.storage_path.rstrip("/")
+    result = []
+    for c in captures:
+        image_url = None
+        if c.image_path:
+            rel = c.image_path.replace(storage_base, "").lstrip("/")
+            image_url = f"/storage/{rel}"
+        result.append({
+            "id": c.id,
+            "page": c.page,
+            "breakpoint": c.breakpoint,
+            "source": c.source.value,
+            "image_url": image_url,
+        })
+    return result
+
+
 @router.get("/api/runs/{run_id}/stream")
 async def stream_run(
     run_id: int,
@@ -219,6 +255,21 @@ async def stream_run(
             from app.config import settings
 
             r = aioredis.from_url(settings.redis_url)
+
+            # Send cached latest progress immediately so returning users see current state
+            cached = await r.get(f"qa_run:{run_id}:latest")
+            if cached:
+                event_id += 1
+                cached_str = cached.decode() if isinstance(cached, bytes) else cached
+                yield f"id: {event_id}\ndata: {cached_str}\n\n"
+                # Check if already terminal
+                try:
+                    parsed_cached = json.loads(cached_str)
+                    if parsed_cached.get("step") in ("completed", "failed"):
+                        return
+                except Exception:
+                    pass
+
             pubsub = r.pubsub()
             await pubsub.subscribe(channel)
 
@@ -306,3 +357,64 @@ def compare_runs(
         "still_open": result["still_open"],
         "new": result["new"],
     }
+
+
+@router.get("/api/runs/{run_id}/accessibility")
+def get_run_accessibility(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list:
+    """Return all ADA/accessibility results for a run."""
+    _get_run_or_404(db, run_id)
+    results = (
+        db.query(AccessibilityResult)
+        .filter(AccessibilityResult.qa_run_id == run_id)
+        .order_by(AccessibilityResult.page, AccessibilityResult.severity)
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "page": r.page,
+            "test_name": r.test_name,
+            "severity": r.severity,
+            "description": r.description,
+            "wcag": r.wcag,
+            "element": r.element,
+            "help_text": r.help_text,
+        }
+        for r in results
+    ]
+
+
+@router.get("/api/runs/{run_id}/link-audit")
+def get_run_link_audit(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list:
+    """Return all link/button audit items for a run."""
+    _get_run_or_404(db, run_id)
+    items = (
+        db.query(LinkAudit)
+        .filter(LinkAudit.qa_run_id == run_id)
+        .order_by(LinkAudit.page, LinkAudit.element_type)
+        .all()
+    )
+    return [
+        {
+            "id": item.id,
+            "page": item.page,
+            "element_type": item.element_type,
+            "text": item.text,
+            "href": item.href,
+            "destination": item.destination,
+            "is_external": item.is_external,
+            "is_mail_or_tel": item.is_mail_or_tel,
+            "has_href": item.has_href,
+            "issue": item.issue,
+            "aria_label": item.aria_label,
+        }
+        for item in items
+    ]

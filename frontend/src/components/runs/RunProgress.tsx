@@ -6,20 +6,30 @@ interface RunProgressProps {
 
 const stepLabel = (step: string): string => {
   switch (step) {
-    case "capturing":
+    case "discovery":
+      return "Discovering pages";
+    case "capture":
       return "Capturing screenshots";
-    case "comparing":
-      return "Comparing designs";
-    case "analyzing":
-      return "Analyzing issues";
+    case "compare":
+      return "Comparing designs (AI analysis)";
+    case "functional":
+      return "Running functional tests";
+    case "accessibility":
+      return "ADA compliance checks";
+    case "link_audit":
+      return "Link & button audit";
+    case "matching":
+      return "Matching with previous run";
     case "scoring":
       return "Calculating score";
     case "completed":
       return "QA Complete";
     case "failed":
       return "QA Failed";
+    case "cancelled":
+      return "Run Cancelled";
     default:
-      return step.charAt(0).toUpperCase() + step.slice(1);
+      return step.charAt(0).toUpperCase() + step.slice(1).replace(/_/g, " ");
   }
 };
 

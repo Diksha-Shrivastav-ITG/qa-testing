@@ -18,6 +18,7 @@ class IssueResponse(BaseModel):
     location_x: Optional[int] = None
     location_y: Optional[int] = None
     status: str
+    screenshot_path: Optional[str] = None
     original_issue_id: Optional[int] = None
 
     model_config = {"from_attributes": True}

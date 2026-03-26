@@ -26,7 +26,7 @@ const IssueList = ({ runId }: IssueListProps) => {
   const params = {
     severity: severity !== "All" ? severity : undefined,
     type: type !== "All" ? type : undefined,
-    page: String(page),
+    page,
   };
 
   const { data, isLoading, isError } = useQuery<IssuesResponse>({

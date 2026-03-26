@@ -30,65 +30,52 @@ class FunctionalResult:
 
 SHOPIFY_FLOWS = [
     {
-        "name": "add_to_cart",
+        "name": "Add to Cart — User clicks 'Add to Cart' and cart icon updates",
         "steps": [
-            {"action": "click", "selector": "button[name='add'], .add-to-cart, [data-testid='add-to-cart']"},
+            {"action": "click", "selector": "button[name='add'], .add-to-cart, [data-testid='add-to-cart'], form[action*='/cart/add'] button[type='submit']"},
+            {"action": "wait", "duration_ms": 2000},
+            {"action": "assert_visible", "selector": ".cart-count, .cart-icon, [data-testid='cart-count'], .cart-count-bubble, .header__cart-count"},
+        ],
+    },
+    {
+        "name": "Mobile Menu — Hamburger menu opens and shows navigation links",
+        "steps": [
+            {"action": "click", "selector": ".hamburger, .mobile-nav-toggle, [aria-label='Menu'], .menu-toggle, .header__icon--menu, button.menu-drawer__open"},
+            {"action": "wait", "duration_ms": 800},
+            {"action": "assert_visible", "selector": ".mobile-menu, .mobile-nav, nav.is-open, [data-menu='open'], .menu-drawer, .mobile-facets__wrapper"},
+        ],
+    },
+    {
+        "name": "Checkout Flow — User can reach the checkout page after adding a product",
+        "steps": [
+            {"action": "click", "selector": "button[name='add'], .add-to-cart, [data-testid='add-to-cart'], form[action*='/cart/add'] button[type='submit']"},
             {"action": "wait", "duration_ms": 1500},
-            {"action": "assert_visible", "selector": ".cart-count, .cart-icon, [data-testid='cart-count']"},
-        ],
-    },
-    {
-        "name": "mobile_menu",
-        "steps": [
-            {"action": "click", "selector": ".hamburger, .mobile-nav-toggle, [aria-label='Menu'], .menu-toggle"},
-            {"action": "wait", "duration_ms": 500},
-            {"action": "assert_visible", "selector": ".mobile-menu, .mobile-nav, nav.is-open, [data-menu='open']"},
-        ],
-    },
-    {
-        "name": "checkout",
-        "steps": [
-            {"action": "click", "selector": "button[name='add'], .add-to-cart, [data-testid='add-to-cart']"},
-            {"action": "wait", "duration_ms": 1000},
             {"action": "navigate", "value": "/checkout"},
-            {"action": "assert_visible", "selector": "form.edit_checkout, #checkout, [data-step], .checkout__content"},
+            {"action": "assert_visible", "selector": "form.edit_checkout, #checkout, [data-step], .checkout__content, main[role='main']"},
         ],
     },
     {
-        "name": "search",
+        "name": "Search — User opens search, types a query, and results appear",
         "steps": [
-            {"action": "click", "selector": ".search-toggle, .search-btn, [aria-label='Search'], .header__icon--search"},
+            {"action": "click", "selector": ".search-toggle, .search-btn, [aria-label='Search'], .header__icon--search, details-modal .header__icon"},
             {"action": "type", "selector": "input[name='q'], .search-input, input[type='search']", "value": "shirt"},
-            {"action": "wait", "duration_ms": 1000},
-            {"action": "assert_visible", "selector": ".search-results, .predictive-search, [data-search-results]"},
+            {"action": "wait", "duration_ms": 1500},
+            {"action": "assert_visible", "selector": ".search-results, .predictive-search, [data-search-results], predictive-search .predictive-search__results-list"},
         ],
     },
     {
-        "name": "collection_filter",
+        "name": "Collection Filters — Clicking a filter updates the product grid",
         "steps": [
             {"action": "navigate", "value": "/collections/all"},
-            {"action": "click", "selector": ".filter-toggle, .collection-filter, [data-filter], .facets__summary"},
-            {"action": "wait", "duration_ms": 1000},
-            {"action": "assert_changed", "selector": ".collection-grid, .product-grid, [data-products]"},
+            {"action": "click", "selector": ".filter-toggle, .collection-filter, [data-filter], .facets__summary, .facets__disclosure"},
+            {"action": "wait", "duration_ms": 1500},
+            {"action": "assert_changed", "selector": ".collection-grid, .product-grid, [data-products], .collection-product-list"},
         ],
     },
     {
-        "name": "announcement_bar",
+        "name": "Newsletter/Email Signup — Email input exists and submit button is clickable",
         "steps": [
-            {"action": "assert_visible", "selector": ".announcement-bar, .announcement, [data-section-type='announcement-bar']"},
-            {"action": "click", "selector": ".announcement-bar__close, .announcement__close, [aria-label='Close announcement']"},
-            {"action": "wait", "duration_ms": 500},
-            {"action": "assert_hidden", "selector": ".announcement-bar, .announcement, [data-section-type='announcement-bar']"},
-        ],
-    },
-    {
-        "name": "quick_view",
-        "steps": [
-            {"action": "navigate", "value": "/collections/all"},
-            {"action": "hover", "selector": ".product-item, .grid__item, [data-product-id]"},
-            {"action": "click", "selector": ".quick-view, .quick-add, [data-quick-view], [aria-label='Quick view']"},
-            {"action": "wait", "duration_ms": 1000},
-            {"action": "assert_visible", "selector": ".quick-view-modal, .modal, [data-modal], .product-modal"},
+            {"action": "assert_visible", "selector": ".newsletter, .footer__newsletter, input[type='email'], .email-signup, [data-section-type='newsletter']"},
         ],
     },
 ]
@@ -115,8 +102,22 @@ class FunctionalEngine:
         from playwright.async_api import async_playwright
 
         pw = await async_playwright().start()
-        browser = await pw.chromium.launch(headless=True)
-        context = await browser.new_context(viewport={"width": viewport_width, "height": 900})
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        context = await browser.new_context(
+            viewport={"width": viewport_width, "height": 900},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
+        )
+        await context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        )
         page = await context.new_page()
         await page.goto(url, wait_until="networkidle")
         return page

@@ -24,7 +24,7 @@ class FunctionalTest(Base):
     qa_run_id: Mapped[int] = mapped_column(ForeignKey("qa_runs.id"), nullable=False)
     test_name: Mapped[str] = mapped_column(String(512), nullable=False)
     status: Mapped[FunctionalTestStatus] = mapped_column(
-        Enum(FunctionalTestStatus, name="functionalteststs"),
+        Enum(FunctionalTestStatus, name="functionalteststs", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
     )
     severity: Mapped[str | None] = mapped_column(String(50), nullable=True)

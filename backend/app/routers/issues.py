@@ -34,7 +34,7 @@ def list_issues(
     type: Optional[str] = Query(default=None),
     issue_page: Optional[str] = Query(default=None, alias="issue_page", description="Filter by page slug"),
     page: int = Query(default=1, ge=1),
-    per_page: int = Query(default=20, ge=1, le=100),
+    per_page: int = Query(default=50, ge=1, le=500),
     db: Session = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ) -> PaginatedResponse[IssueResponse]:

@@ -5,13 +5,18 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-shopify_qa}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shopify_qa}
+      POSTGRES_USER: ${POSTGRES_USER:-diksha-itg}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-Diksh@05}
       POSTGRES_DB: ${POSTGRES_DB:-shopify_qa}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-diksha-itg} -d ${POSTGRES_DB:-shopify_qa}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7
@@ -27,8 +32,10 @@ services:
       - "8000:8000"
     env_file: ./backend/.env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
       - storage:/app/storage
 
@@ -36,8 +43,10 @@ services:
     build: ./backend
     env_file: ./backend/.env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     command: celery -A app.workers.celery_app worker --loglevel=info
     volumes:
       - storage:/app/storage

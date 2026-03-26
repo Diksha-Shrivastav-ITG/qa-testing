@@ -93,8 +93,8 @@ const SignupForm = () => {
             <input
               type="radio"
               name="role"
-              value="project_manager"
-              checked={role === "project_manager"}
+              value="pm"
+              checked={role === "pm"}
               onChange={(e) => setRole(e.target.value)}
               className="accent-blue-600"
             />

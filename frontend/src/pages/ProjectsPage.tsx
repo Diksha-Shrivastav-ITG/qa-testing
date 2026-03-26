@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listProjects, createProject } from "../api/projects";
 import { startRun } from "../api/runs";
 import ProjectCard from "../components/projects/ProjectCard";
 import ProjectForm from "../components/projects/ProjectForm";
+import RunQAModal from "../components/runs/RunQAModal";
 
 interface Project {
   id: number;
@@ -16,14 +18,16 @@ interface ProjectFormData {
   name: string;
   shopify_url: string;
   source_type: string;
-  source_url: string;
+  source_url?: string;
   shopify_password?: string;
   figma_token?: string;
 }
 
 const ProjectsPage = () => {
   const [showForm, setShowForm] = useState(false);
+  const [runModalProjectId, setRunModalProjectId] = useState<number | null>(null);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["projects"],
@@ -39,10 +43,15 @@ const ProjectsPage = () => {
   });
 
   const runMutation = useMutation({
-    mutationFn: (projectId: number) => startRun(projectId),
+    mutationFn: ({ projectId, pages, testMode }: { projectId: number; pages?: string; testMode?: "design" | "ai" }) =>
+      startRun(projectId, pages || undefined, testMode || "design"),
+    onSuccess: (res) => {
+      setRunModalProjectId(null);
+      navigate(`/runs/${res.data.id}`);
+    },
   });
 
-  const projects: Project[] = data?.projects ?? data ?? [];
+  const projects: Project[] = data?.items ?? [];
 
   return (
     <div className="p-8">
@@ -94,7 +103,7 @@ const ProjectsPage = () => {
             <ProjectCard
               key={project.id}
               project={project}
-              onRunQA={(id) => runMutation.mutate(id)}
+              onRunQA={(id) => setRunModalProjectId(id)}
             />
           ))}
         </div>
@@ -106,6 +115,17 @@ const ProjectsPage = () => {
           onSubmit={(data) => createMutation.mutate(data)}
           onCancel={() => setShowForm(false)}
           isLoading={createMutation.isPending}
+        />
+      )}
+
+      {/* Run QA modal */}
+      {runModalProjectId !== null && (
+        <RunQAModal
+          onConfirm={(pages, testMode) =>
+            runMutation.mutate({ projectId: runModalProjectId, pages, testMode })
+          }
+          onCancel={() => setRunModalProjectId(null)}
+          isLoading={runMutation.isPending}
         />
       )}
     </div>

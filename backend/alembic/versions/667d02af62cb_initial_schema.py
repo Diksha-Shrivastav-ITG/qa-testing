@@ -8,6 +8,7 @@ Create Date: 2026-03-24 15:05:55.278371
 from typing import Sequence, Union
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from alembic import op
 
 
@@ -20,55 +21,37 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Create initial schema."""
-    # --- Enum types -------------------------------------------------------
-    userrole = sa.Enum("admin", "developer", "pm", name="userrole")
-    sourcetype = sa.Enum("framer", "figma", name="sourcetype")
-    runstatus = sa.Enum("running", "completed", "failed", "cancelled", name="runstatus")
-    capturesource = sa.Enum("shopify", "design", name="capturesource")
-    aianalysisstatus = sa.Enum("completed", "pending", "failed", name="aianalysisstatus")
-    issuetype = sa.Enum("visual", "functional", "content", name="issuetype")
-    issueseverity = sa.Enum("critical", "major", "minor", name="issueseverity")
-    issuestatus = sa.Enum("open", "resolved", "new", name="issuestatus")
-    functionalteststs = sa.Enum("pass", "fail", name="functionalteststs")
+    # --- Enum types (idempotent via DO blocks) --------------------------------
+    op.execute(sa.text("DO $$ BEGIN CREATE TYPE userrole AS ENUM ('admin', 'developer', 'pm'); EXCEPTION WHEN duplicate_object THEN null; END $$"))
+    op.execute(sa.text("DO $$ BEGIN CREATE TYPE sourcetype AS ENUM ('framer', 'figma'); EXCEPTION WHEN duplicate_object THEN null; END $$"))
+    op.execute(sa.text("DO $$ BEGIN CREATE TYPE runstatus AS ENUM ('running', 'completed', 'failed', 'cancelled'); EXCEPTION WHEN duplicate_object THEN null; END $$"))
+    op.execute(sa.text("DO $$ BEGIN CREATE TYPE capturesource AS ENUM ('shopify', 'design'); EXCEPTION WHEN duplicate_object THEN null; END $$"))
+    op.execute(sa.text("DO $$ BEGIN CREATE TYPE aianalysisstatus AS ENUM ('completed', 'pending', 'failed'); EXCEPTION WHEN duplicate_object THEN null; END $$"))
+    op.execute(sa.text("DO $$ BEGIN CREATE TYPE issuetype AS ENUM ('visual', 'functional', 'content'); EXCEPTION WHEN duplicate_object THEN null; END $$"))
+    op.execute(sa.text("DO $$ BEGIN CREATE TYPE issueseverity AS ENUM ('critical', 'major', 'minor'); EXCEPTION WHEN duplicate_object THEN null; END $$"))
+    op.execute(sa.text("DO $$ BEGIN CREATE TYPE issuestatus AS ENUM ('open', 'resolved', 'new'); EXCEPTION WHEN duplicate_object THEN null; END $$"))
+    op.execute(sa.text("DO $$ BEGIN CREATE TYPE functionalteststs AS ENUM ('pass', 'fail'); EXCEPTION WHEN duplicate_object THEN null; END $$"))
 
-    userrole.create(op.get_bind(), checkfirst=True)
-    sourcetype.create(op.get_bind(), checkfirst=True)
-    runstatus.create(op.get_bind(), checkfirst=True)
-    capturesource.create(op.get_bind(), checkfirst=True)
-    aianalysisstatus.create(op.get_bind(), checkfirst=True)
-    issuetype.create(op.get_bind(), checkfirst=True)
-    issueseverity.create(op.get_bind(), checkfirst=True)
-    issuestatus.create(op.get_bind(), checkfirst=True)
-    functionalteststs.create(op.get_bind(), checkfirst=True)
-
-    # --- users ------------------------------------------------------------
+    # --- users ----------------------------------------------------------------
     op.create_table(
         "users",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("email", sa.String(255), nullable=False),
         sa.Column("name", sa.String(255), nullable=False),
-        sa.Column(
-            "role",
-            sa.Enum("admin", "developer", "pm", name="userrole"),
-            nullable=False,
-        ),
+        sa.Column("role", PgEnum("admin", "developer", "pm", name="userrole", create_type=False), nullable=False),
         sa.Column("password_hash", sa.String(255), nullable=False),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_users_email"), "users", ["email"], unique=True)
 
-    # --- projects ---------------------------------------------------------
+    # --- projects -------------------------------------------------------------
     op.create_table(
         "projects",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("shopify_url", sa.String(512), nullable=False),
-        sa.Column(
-            "source_type",
-            sa.Enum("framer", "figma", name="sourcetype"),
-            nullable=False,
-        ),
+        sa.Column("source_type", PgEnum("framer", "figma", name="sourcetype", create_type=False), nullable=False),
         sa.Column("source_url", sa.String(512), nullable=False),
         sa.Column("shopify_password", sa.String(1024), nullable=True),
         sa.Column("framer_password", sa.String(1024), nullable=True),
@@ -81,16 +64,12 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
 
-    # --- qa_runs ----------------------------------------------------------
+    # --- qa_runs --------------------------------------------------------------
     op.create_table(
         "qa_runs",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("project_id", sa.Integer(), nullable=False),
-        sa.Column(
-            "status",
-            sa.Enum("running", "completed", "failed", "cancelled", name="runstatus"),
-            nullable=False,
-        ),
+        sa.Column("status", PgEnum("running", "completed", "failed", "cancelled", name="runstatus", create_type=False), nullable=False),
         sa.Column("overall_score", sa.Float(), nullable=True),
         sa.Column("run_number", sa.Integer(), nullable=False),
         sa.Column("started_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
@@ -99,16 +78,12 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
 
-    # --- captures ---------------------------------------------------------
+    # --- captures -------------------------------------------------------------
     op.create_table(
         "captures",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("qa_run_id", sa.Integer(), nullable=False),
-        sa.Column(
-            "source",
-            sa.Enum("shopify", "design", name="capturesource"),
-            nullable=False,
-        ),
+        sa.Column("source", PgEnum("shopify", "design", name="capturesource", create_type=False), nullable=False),
         sa.Column("page", sa.String(512), nullable=False),
         sa.Column("breakpoint", sa.Integer(), nullable=False),
         sa.Column("image_path", sa.String(1024), nullable=False),
@@ -116,7 +91,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
 
-    # --- comparisons ------------------------------------------------------
+    # --- comparisons ----------------------------------------------------------
     op.create_table(
         "comparisons",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -126,59 +101,39 @@ def upgrade() -> None:
         sa.Column("ssim_score", sa.Float(), nullable=True),
         sa.Column("diff_image_path", sa.String(1024), nullable=True),
         sa.Column("heatmap_path", sa.String(1024), nullable=True),
-        sa.Column(
-            "ai_analysis_status",
-            sa.Enum("completed", "pending", "failed", name="aianalysisstatus"),
-            nullable=False,
-        ),
+        sa.Column("ai_analysis_status", PgEnum("completed", "pending", "failed", name="aianalysisstatus", create_type=False), nullable=False),
         sa.ForeignKeyConstraint(["qa_run_id"], ["qa_runs.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
 
-    # --- issues -----------------------------------------------------------
+    # --- issues ---------------------------------------------------------------
     op.create_table(
         "issues",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("qa_run_id", sa.Integer(), nullable=False),
         sa.Column("page", sa.String(512), nullable=False),
         sa.Column("breakpoint", sa.Integer(), nullable=True),
-        sa.Column(
-            "type",
-            sa.Enum("visual", "functional", "content", name="issuetype"),
-            nullable=False,
-        ),
-        sa.Column(
-            "severity",
-            sa.Enum("critical", "major", "minor", name="issueseverity"),
-            nullable=False,
-        ),
+        sa.Column("type", PgEnum("visual", "functional", "content", name="issuetype", create_type=False), nullable=False),
+        sa.Column("severity", PgEnum("critical", "major", "minor", name="issueseverity", create_type=False), nullable=False),
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("ai_suggestion", sa.Text(), nullable=True),
         sa.Column("element_selector", sa.String(1024), nullable=True),
         sa.Column("location_x", sa.Integer(), nullable=True),
         sa.Column("location_y", sa.Integer(), nullable=True),
-        sa.Column(
-            "status",
-            sa.Enum("open", "resolved", "new", name="issuestatus"),
-            nullable=False,
-        ),
+        sa.Column("status", PgEnum("open", "resolved", "new", name="issuestatus", create_type=False), nullable=False),
         sa.Column("original_issue_id", sa.Integer(), nullable=True),
         sa.ForeignKeyConstraint(["original_issue_id"], ["issues.id"]),
         sa.ForeignKeyConstraint(["qa_run_id"], ["qa_runs.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
 
-    # --- functional_tests -------------------------------------------------
+    # --- functional_tests -----------------------------------------------------
     op.create_table(
         "functional_tests",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("qa_run_id", sa.Integer(), nullable=False),
         sa.Column("test_name", sa.String(512), nullable=False),
-        sa.Column(
-            "status",
-            sa.Enum("pass", "fail", name="functionalteststs"),
-            nullable=False,
-        ),
+        sa.Column("status", PgEnum("pass", "fail", name="functionalteststs", create_type=False), nullable=False),
         sa.Column("severity", sa.String(50), nullable=True),
         sa.Column("step_failed", sa.String(512), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
@@ -199,13 +154,12 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_users_email"), table_name="users")
     op.drop_table("users")
 
-    # Drop enum types
-    sa.Enum(name="functionalteststs").drop(op.get_bind(), checkfirst=True)
-    sa.Enum(name="issuestatus").drop(op.get_bind(), checkfirst=True)
-    sa.Enum(name="issueseverity").drop(op.get_bind(), checkfirst=True)
-    sa.Enum(name="issuetype").drop(op.get_bind(), checkfirst=True)
-    sa.Enum(name="aianalysisstatus").drop(op.get_bind(), checkfirst=True)
-    sa.Enum(name="capturesource").drop(op.get_bind(), checkfirst=True)
-    sa.Enum(name="runstatus").drop(op.get_bind(), checkfirst=True)
-    sa.Enum(name="sourcetype").drop(op.get_bind(), checkfirst=True)
-    sa.Enum(name="userrole").drop(op.get_bind(), checkfirst=True)
+    op.execute(sa.text("DROP TYPE IF EXISTS functionalteststs"))
+    op.execute(sa.text("DROP TYPE IF EXISTS issuestatus"))
+    op.execute(sa.text("DROP TYPE IF EXISTS issueseverity"))
+    op.execute(sa.text("DROP TYPE IF EXISTS issuetype"))
+    op.execute(sa.text("DROP TYPE IF EXISTS aianalysisstatus"))
+    op.execute(sa.text("DROP TYPE IF EXISTS capturesource"))
+    op.execute(sa.text("DROP TYPE IF EXISTS runstatus"))
+    op.execute(sa.text("DROP TYPE IF EXISTS sourcetype"))
+    op.execute(sa.text("DROP TYPE IF EXISTS userrole"))

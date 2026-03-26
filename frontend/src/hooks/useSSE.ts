@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface SSEProgress {
   step: string;
@@ -14,43 +14,66 @@ interface UseSSEResult {
   error: string | null;
 }
 
-const TERMINAL_STEPS = ["completed", "failed"];
+const TERMINAL_STEPS = ["completed", "failed", "cancelled"];
+const MAX_RECONNECTS = 5;
+const RECONNECT_DELAY_MS = 3000;
 
 export const useSSE = (runId: number | null): UseSSEResult => {
   const [progress, setProgress] = useState<SSEProgress | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const reconnectCount = useRef(0);
+  const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (runId === null) return;
 
-    const token = localStorage.getItem("token");
-    const url = `http://localhost:8000/api/runs/${runId}/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+    let cancelled = false;
 
-    const es = new EventSource(url);
+    const connect = () => {
+      if (cancelled) return;
 
-    es.onmessage = (event) => {
-      try {
-        const data: SSEProgress = JSON.parse(event.data);
-        setProgress(data);
-        if (TERMINAL_STEPS.includes(data.step)) {
-          setIsComplete(true);
-          es.close();
+      const token = localStorage.getItem("token");
+      const url = `http://localhost:8000/api/runs/${runId}/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+
+      const es = new EventSource(url);
+      esRef.current = es;
+
+      es.onmessage = (event) => {
+        try {
+          const data: SSEProgress = JSON.parse(event.data);
+          setProgress(data);
+          reconnectCount.current = 0; // reset on successful message
+          if (TERMINAL_STEPS.includes(data.step)) {
+            setIsComplete(true);
+            es.close();
+          }
+        } catch {
+          // ignore parse errors
         }
-      } catch {
-        // ignore parse errors
-      }
+      };
+
+      es.onerror = () => {
+        es.close();
+        if (cancelled) return;
+
+        // Auto-reconnect unless we've hit the limit or already complete
+        if (reconnectCount.current < MAX_RECONNECTS && !isComplete) {
+          reconnectCount.current++;
+          setTimeout(connect, RECONNECT_DELAY_MS);
+        } else {
+          setError("Connection lost. Refresh to check status.");
+        }
+      };
     };
 
-    es.onerror = () => {
-      setError("Connection to run stream failed.");
-      es.close();
-    };
+    connect();
 
     return () => {
-      es.close();
+      cancelled = true;
+      esRef.current?.close();
     };
-  }, [runId]);
+  }, [runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { progress, isComplete, error };
 };

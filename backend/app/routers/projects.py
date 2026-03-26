@@ -4,7 +4,7 @@ import asyncio
 import math
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -30,7 +30,7 @@ def check_project_owner(project: Project, user: User) -> None:
 def create_project(
     payload: ProjectCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin", "developer")),
+    current_user: User = Depends(require_role("admin", "developer", "pm")),
 ) -> ProjectResponse:
     project = Project(
         name=payload.name,
@@ -103,26 +103,42 @@ def update_project(
     return project  # type: ignore[return-value]
 
 
+# @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+# def delete_project(
+#     project_id: int,
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+# ) -> None:
+#     project = db.query(Project).filter(Project.id == project_id).first()
+#     if project is None:
+#         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+#     check_project_owner(project, current_user)
+
+#     db.delete(project)
+#     db.commit()
+
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_project(
     project_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> None:
+) -> Response:
     project = db.query(Project).filter(Project.id == project_id).first()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
     check_project_owner(project, current_user)
 
     db.delete(project)
     db.commit()
 
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @router.post("/{project_id}/discover")
 def discover_project(
     project_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin", "developer")),
+    current_user: User = Depends(require_role("admin", "developer", "pm")),
 ) -> dict:
     """Discover pages for both Shopify and source sites, auto-map them,
     persist mappings in project.config, and return the result."""
@@ -189,7 +205,7 @@ def update_mappings(
     project_id: int,
     payload: dict[str, str],
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin", "developer")),
+    current_user: User = Depends(require_role("admin", "developer", "pm")),
 ) -> dict:
     """Replace the stored page mappings for a project."""
     project = db.query(Project).filter(Project.id == project_id).first()

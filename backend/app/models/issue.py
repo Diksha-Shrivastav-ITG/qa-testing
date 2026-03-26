@@ -55,6 +55,7 @@ class Issue(Base):
         nullable=False,
         default=IssueStatus.open,
     )
+    screenshot_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     original_issue_id: Mapped[int | None] = mapped_column(
         ForeignKey("issues.id"), nullable=True
     )

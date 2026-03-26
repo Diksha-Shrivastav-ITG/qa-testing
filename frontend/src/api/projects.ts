@@ -9,7 +9,7 @@ export const createProject = (data: {
   name: string;
   shopify_url: string;
   source_type: string;
-  source_url: string;
+  source_url?: string;
   shopify_password?: string;
   figma_token?: string;
 }) => api.post("/api/projects", data);
