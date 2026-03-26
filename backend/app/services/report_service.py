@@ -199,10 +199,6 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
                     selector = issue.element_selector or ""
                     title = _title_from_description(issue.description)
 
-                    # Issue-level cropped screenshot
-                    issue_ss_url = _storage_to_url(getattr(issue, "screenshot_path", None), storage_base) if hasattr(issue, "screenshot_path") and issue.screenshot_path else None
-                    issue_ss_html = f'<div style="margin-top:0.5rem;"><img src="{issue_ss_url}" style="max-height:200px;border-radius:6px;border:1px solid #e5e7eb;" alt="Issue screenshot"/></div>' if issue_ss_url else ''
-
                     issue_items_html += f"""
                     <div class="issue-block" style="border-left:4px solid {SEV_COLORS.get(sev,'#999')};background:{SEV_BG.get(sev,'#f9fafb')};">
                       <div class="issue-header-row">
@@ -215,7 +211,6 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
                         {f'<li><strong>Element:</strong> <code>{selector}</code></li>' if selector else ''}
                         {f'<li><strong>Expected / Fix:</strong> {suggestion}</li>' if suggestion else ''}
                       </ul>
-                      {issue_ss_html}
                     </div>"""
 
             sub_html += f"""
