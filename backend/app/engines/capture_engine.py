@@ -237,12 +237,12 @@ class CaptureEngine:
             # Handle password-protected Shopify stores
             if password:
                 try:
-                    await page.goto(f"{base_store}/password", wait_until="networkidle", timeout=20000)
+                    await page.goto(f"{base_store}/password", wait_until="domcontentloaded", timeout=30000)
                     pwd_input = page.locator("input[type='password']")
                     if await pwd_input.is_visible(timeout=3000):
                         await pwd_input.fill(password)
                         await page.locator("button[type='submit'], input[type='submit']").click()
-                        await page.wait_for_load_state("networkidle")
+                        await page.wait_for_load_state("domcontentloaded")
                         await asyncio.sleep(1)
                 except Exception:
                     pass
@@ -259,7 +259,7 @@ class CaptureEngine:
                 }])
 
             # Navigate to the target URL
-            await page.goto(url, wait_until="networkidle", timeout=15000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
             # Inject cleanup CSS to suppress UI noise
             await page.add_style_tag(content=CLEANUP_CSS)

@@ -91,7 +91,7 @@ async def _capture_element_screenshot(
                 "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
             )
             page = await ctx.new_page()
-            await page.goto(page_url, wait_until="networkidle", timeout=20000)
+            await page.goto(page_url, wait_until="domcontentloaded", timeout=60000)
             await asyncio.sleep(2)
 
             # Try each selector (comma-separated)

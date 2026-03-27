@@ -56,12 +56,12 @@ class DiscoveryEngine:
 
         if password:
             try:
-                await page.goto(f"{base_store}/password", wait_until="networkidle", timeout=20000)
+                await page.goto(f"{base_store}/password", wait_until="domcontentloaded", timeout=30000)
                 pwd_input = page.locator("input[type='password']")
                 if await pwd_input.is_visible(timeout=3000):
                     await pwd_input.fill(password)
                     await page.locator("button[type='submit'], input[type='submit']").click()
-                    await page.wait_for_load_state("networkidle")
+                    await page.wait_for_load_state("domcontentloaded")
             except Exception:
                 pass
 
@@ -75,7 +75,7 @@ class DiscoveryEngine:
                 "path": "/",
             }])
 
-        await page.goto(url, wait_until="networkidle", timeout=15000)
+        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
         return page
 
     # ------------------------------------------------------------------

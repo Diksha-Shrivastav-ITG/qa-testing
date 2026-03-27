@@ -159,12 +159,12 @@ class AccessibilityEngine:
             # Handle password-protected stores
             if password:
                 try:
-                    await page.goto(f"{base_store}/password", wait_until="networkidle", timeout=20000)
+                    await page.goto(f"{base_store}/password", wait_until="domcontentloaded", timeout=30000)
                     pwd_input = page.locator("input[type='password']")
                     if await pwd_input.is_visible(timeout=3000):
                         await pwd_input.fill(password)
                         await page.locator("button[type='submit'], input[type='submit']").click()
-                        await page.wait_for_load_state("networkidle")
+                        await page.wait_for_load_state("domcontentloaded")
                 except Exception:
                     pass
 
@@ -178,7 +178,7 @@ class AccessibilityEngine:
                     "path": "/",
                 }])
 
-            await page.goto(page_url, wait_until="networkidle", timeout=30000)
+            await page.goto(page_url, wait_until="domcontentloaded", timeout=60000)
             await asyncio.sleep(2)
 
             # Try axe-core first
