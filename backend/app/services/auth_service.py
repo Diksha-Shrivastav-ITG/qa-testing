@@ -22,18 +22,22 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(user_id: int, role: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
     payload = {
         "sub": str(user_id),
         "role": role,
-        "exp": expire,
+        # No "exp" — token never expires, user must click logout
     }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
 def decode_token(token: str) -> Optional[dict]:
     try:
-        return jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
+        return jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[settings.jwt_algorithm],
+            options={"verify_exp": False},  # No expiration check
+        )
     except JWTError:
         return None
 
