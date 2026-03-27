@@ -12,7 +12,7 @@ from app.workers.celery_app import celery_app
 # Constants
 # ---------------------------------------------------------------------------
 
-BREAKPOINTS = [375, 425, 768, 1024, 1280, 1440, 1920]
+BREAKPOINTS = [375, 768, 1440]  # Mobile, Tablet, Desktop — fast and covers all
 
 
 def _build_page_url(base_url: str, path: str) -> str:
@@ -312,15 +312,37 @@ async def _run_qa_job_async(
             page_name = shopify_path.strip("/") or "home"
             shopify_url = _build_page_url(project.shopify_url, shopify_path)
 
-            # Always capture Shopify
-            shopify_results = await capture_engine.capture_page(
-                url=shopify_url,
-                page_name=page_name,
-                run_dir=run_dir,
-                source="shopify",
-                breakpoints=BREAKPOINTS,
-                password=project.shopify_password,
-            )
+            if skip_design:
+                shopify_results = await capture_engine.capture_page(
+                    url=shopify_url,
+                    page_name=page_name,
+                    run_dir=run_dir,
+                    source="shopify",
+                    breakpoints=BREAKPOINTS,
+                    password=project.shopify_password,
+                )
+                design_results = []
+            else:
+                # Capture Shopify + Design simultaneously
+                source_url = (project.source_url or "").rstrip("/") + source_path
+                shopify_results, design_results = await asyncio.gather(
+                    capture_engine.capture_page(
+                        url=shopify_url,
+                        page_name=page_name,
+                        run_dir=run_dir,
+                        source="shopify",
+                        breakpoints=BREAKPOINTS,
+                        password=project.shopify_password,
+                    ),
+                    capture_engine.capture_page(
+                        url=source_url,
+                        page_name=page_name,
+                        run_dir=run_dir,
+                        source="design",
+                        breakpoints=BREAKPOINTS,
+                        password=project.framer_password,
+                    ),
+                )
 
             for cr in shopify_results:
                 captured_count += 1
@@ -342,7 +364,6 @@ async def _run_qa_job_async(
             shopify_by_bp = {r.breakpoint: r for r in shopify_results if r.status == "success"}
 
             if skip_design:
-                # AI-only: build pairs using only Shopify screenshots
                 for bp, sr in shopify_by_bp.items():
                     capture_pairs.append({
                         "page": page_name,
@@ -352,17 +373,6 @@ async def _run_qa_job_async(
                         "mode": "ai",
                     })
             else:
-                # Design comparison: also capture the design source
-                source_url = (project.source_url or "").rstrip("/") + source_path
-                design_results = await capture_engine.capture_page(
-                    url=source_url,
-                    page_name=page_name,
-                    run_dir=run_dir,
-                    source="design",
-                    breakpoints=BREAKPOINTS,
-                    password=project.framer_password,
-                )
-
                 for dr in design_results:
                     captured_count += 1
                     _publish_fn(
@@ -410,37 +420,46 @@ async def _run_qa_job_async(
             "minor": IssueSeverity.minor,
         }
 
-        for idx, pair in enumerate(capture_pairs):
-            db.refresh(run)
-            if run.status == RunStatus.cancelled:
-                _publish_fn(run_id, "cancelled", progress=0.0, message="Run cancelled")
-                return
+        # Run all breakpoint comparisons concurrently — semaphore caps parallel AI calls
+        _compare_sem = asyncio.Semaphore(6)
 
-            output_dir = os.path.join(
-                settings.storage_path, run_dir, "comparisons",
-                pair["page"], str(pair["breakpoint"])
-            )
+        async def _run_single_comparison(pair: dict):
+            async with _compare_sem:
+                _out = os.path.join(
+                    settings.storage_path, run_dir, "comparisons",
+                    pair["page"], str(pair["breakpoint"])
+                )
+                try:
+                    if pair["mode"] == "ai":
+                        result = await comparison_engine.compare_ai_only(
+                            shopify_path=pair["shopify_path"],
+                            output_dir=_out,
+                            page=pair["page"],
+                            breakpoint=pair["breakpoint"],
+                        )
+                    else:
+                        result = await comparison_engine.compare(
+                            design_path=pair["design_path"],
+                            shopify_path=pair["shopify_path"],
+                            output_dir=_out,
+                            page=pair["page"],
+                            breakpoint=pair["breakpoint"],
+                        )
+                    return pair, result
+                except Exception:
+                    return pair, None
 
-            try:
-                if pair["mode"] == "ai":
-                    comp_result = await comparison_engine.compare_ai_only(
-                        shopify_path=pair["shopify_path"],
-                        output_dir=output_dir,
-                        page=pair["page"],
-                        breakpoint=pair["breakpoint"],
-                    )
-                    msg = f"AI analysis of {pair['page']} @{pair['breakpoint']}px"
-                else:
-                    comp_result = await comparison_engine.compare(
-                        design_path=pair["design_path"],
-                        shopify_path=pair["shopify_path"],
-                        output_dir=output_dir,
-                        page=pair["page"],
-                        breakpoint=pair["breakpoint"],
-                    )
-                    msg = f"Compared {pair['page']} @{pair['breakpoint']}px SSIM={comp_result.ssim_score:.3f}"
-            except Exception:
+        _publish_fn(run_id, "compare", progress=_overall_progress(done_phases, "compare", 0), message="Running AI comparisons in parallel")
+        raw_compare_results = await asyncio.gather(*[_run_single_comparison(p) for p in capture_pairs])
+
+        for idx, (pair, comp_result) in enumerate(raw_compare_results):
+            if comp_result is None:
                 continue
+
+            if pair["mode"] == "ai":
+                msg = f"AI analysis of {pair['page']} @{pair['breakpoint']}px"
+            else:
+                msg = f"Compared {pair['page']} @{pair['breakpoint']}px SSIM={comp_result.ssim_score:.3f}"
 
             ai_status = AiAnalysisStatus.failed if comp_result.ai_status == "failed" else AiAnalysisStatus.completed
             db.add(Comparison(
@@ -453,13 +472,10 @@ async def _run_qa_job_async(
                 ai_analysis_status=ai_status,
             ))
 
-            for issue_idx, ai_issue in enumerate(comp_result.ai_issues):
+            for ai_issue in comp_result.ai_issues:
                 severity_str = ai_issue.get("severity", "minor").lower()
                 severity = _severity_map.get(severity_str, IssueSeverity.minor)
-
-                # Use element description instead of fake CSS selectors
                 element_desc = ai_issue.get("element", "")
-
                 db.add(Issue(
                     qa_run_id=run_id,
                     page=pair["page"],
@@ -468,10 +484,10 @@ async def _run_qa_job_async(
                     severity=severity,
                     description=ai_issue.get("description", "Visual issue detected"),
                     ai_suggestion=ai_issue.get("suggestion"),
-                    element_selector=element_desc,  # Human-readable element name, not CSS
+                    element_selector=element_desc,
                     location_x=None,
                     location_y=None,
-                    screenshot_path=pair["shopify_path"],  # Use full page screenshot
+                    screenshot_path=pair["shopify_path"],
                     status=IssueStatus.open,
                 ))
 
@@ -527,119 +543,68 @@ async def _run_qa_job_async(
         done_phases.append("functional")
         _publish_fn(run_id, "functional", progress=_overall_progress(done_phases, "", 0), message="Functional tests complete")
 
-        # ---- Phase 5: Accessibility (ADA) ----
-        _publish_fn(run_id, "accessibility", progress=_overall_progress(done_phases, "accessibility", 0), message="Running ADA compliance checks")
+        # ---- Phases 5+6+6b: Accessibility, Link Audit, SEO — all run concurrently per page ----
+        from app.engines.seo_engine import SeoPerformanceEngine
+        from app.models.seo_result import SeoResult as SeoResultModel, PerformanceResult
 
         accessibility_engine = AccessibilityEngine()
-        pages_tested = set()
-        try:
-            for shopify_path in list(page_mappings.keys())[:3]:  # limit to first 3 pages
-                db.refresh(run)
-                if run.status == RunStatus.cancelled:
-                    return
+        link_engine = LinkAuditEngine()
+        seo_engine = SeoPerformanceEngine()
 
-                page_name = shopify_path.strip("/") or "home"
-                if page_name in pages_tested:
-                    continue
-                pages_tested.add(page_name)
+        _publish_fn(run_id, "accessibility", progress=_overall_progress(done_phases, "accessibility", 0), message="Running ADA, link audit & SEO in parallel")
 
-                page_url = _build_page_url(project.shopify_url, shopify_path)
-                _publish_fn(run_id, "accessibility",
-                            progress=_overall_progress(done_phases, "accessibility", 0.3),
-                            message=f"ADA check: {page_name}")
+        combined_pages_tested: set[str] = set()
+        for shopify_path in list(page_mappings.keys())[:3]:
+            db.refresh(run)
+            if run.status == RunStatus.cancelled:
+                return
 
+            page_name = shopify_path.strip("/") or "home"
+            if page_name in combined_pages_tested:
+                continue
+            combined_pages_tested.add(page_name)
+            page_url = _build_page_url(project.shopify_url, shopify_path)
+
+            _publish_fn(run_id, "accessibility",
+                        progress=_overall_progress(done_phases, "accessibility", 0.3),
+                        message=f"Checking {page_name}: ADA + links + SEO simultaneously")
+
+            acc_results, link_items, seo_result = await asyncio.gather(
+                accessibility_engine.run_checks(page_url=page_url, password=project.shopify_password),
+                link_engine.audit_page(page_url=page_url, password=project.shopify_password),
+                seo_engine.analyze_page(page_url=page_url, password=project.shopify_password),
+                return_exceptions=True,
+            )
+
+            if not isinstance(acc_results, Exception):
                 try:
-                    acc_results = await accessibility_engine.run_checks(
-                        page_url=page_url,
-                        password=project.shopify_password,
-                    )
                     for ar in acc_results:
                         db.add(AccessibilityResult(
-                            qa_run_id=run_id,
-                            page=page_name,
-                            test_name=ar.test_name,
-                            severity=ar.severity,
-                            description=ar.description,
-                            wcag=ar.wcag,
-                            element=ar.element,
-                            help_text=ar.help_text,
+                            qa_run_id=run_id, page=page_name,
+                            test_name=ar.test_name, severity=ar.severity,
+                            description=ar.description, wcag=ar.wcag,
+                            element=ar.element, help_text=ar.help_text,
                         ))
                     db.commit()
                 except Exception:
                     pass
 
-        except Exception:
-            pass
-
-        done_phases.append("accessibility")
-        _publish_fn(run_id, "accessibility", progress=_overall_progress(done_phases, "", 0), message="Accessibility checks complete")
-
-        # ---- Phase 6: Link Audit ----
-        _publish_fn(run_id, "link_audit", progress=_overall_progress(done_phases, "link_audit", 0), message="Auditing links and buttons")
-
-        link_engine = LinkAuditEngine()
-        try:
-            for shopify_path in list(page_mappings.keys())[:3]:  # limit to first 3 pages
-                db.refresh(run)
-                if run.status == RunStatus.cancelled:
-                    return
-
-                page_name = shopify_path.strip("/") or "home"
-                page_url = _build_page_url(project.shopify_url, shopify_path)
-                _publish_fn(run_id, "link_audit",
-                            progress=_overall_progress(done_phases, "link_audit", 0.5),
-                            message=f"Link audit: {page_name}")
-
+            if not isinstance(link_items, Exception):
                 try:
-                    link_items = await link_engine.audit_page(
-                        page_url=page_url,
-                        password=project.shopify_password,
-                    )
                     for item in link_items:
                         db.add(LinkAudit(
-                            qa_run_id=run_id,
-                            page=page_name,
-                            element_type=item.element_type,
-                            text=item.text,
-                            href=item.href,
-                            destination=item.destination,
-                            is_external=item.is_external,
-                            is_mail_or_tel=item.is_mail_or_tel,
-                            has_href=item.has_href,
-                            issue=item.issue,
-                            aria_label=item.aria_label,
+                            qa_run_id=run_id, page=page_name,
+                            element_type=item.element_type, text=item.text,
+                            href=item.href, destination=item.destination,
+                            is_external=item.is_external, is_mail_or_tel=item.is_mail_or_tel,
+                            has_href=item.has_href, issue=item.issue, aria_label=item.aria_label,
                         ))
                     db.commit()
                 except Exception:
                     pass
 
-        except Exception:
-            pass
-
-        done_phases.append("link_audit")
-        _publish_fn(run_id, "link_audit", progress=_overall_progress(done_phases, "", 0), message="Link audit complete")
-
-        # ---- Phase 6b: SEO & Performance ----
-        _publish_fn(run_id, "seo", progress=_overall_progress(done_phases, "link_audit", 0.8), message="Running SEO & performance checks")
-
-        try:
-            from app.engines.seo_engine import SeoPerformanceEngine
-            from app.models.seo_result import SeoResult as SeoResultModel, PerformanceResult
-
-            seo_engine = SeoPerformanceEngine()
-            seo_pages_tested = set()
-            for shopify_path in list(page_mappings.keys())[:3]:
-                page_name = shopify_path.strip("/") or "home"
-                if page_name in seo_pages_tested:
-                    continue
-                seo_pages_tested.add(page_name)
-                page_url = _build_page_url(project.shopify_url, shopify_path)
-
+            if not isinstance(seo_result, Exception):
                 try:
-                    seo_result = await seo_engine.analyze_page(
-                        page_url=page_url,
-                        password=project.shopify_password,
-                    )
                     for check in seo_result.seo_checks:
                         db.add(SeoResultModel(
                             qa_run_id=run_id, page=page_name,
@@ -662,8 +627,10 @@ async def _run_qa_job_async(
                     db.commit()
                 except Exception:
                     pass
-        except Exception:
-            pass
+
+        done_phases.append("accessibility")
+        done_phases.append("link_audit")
+        _publish_fn(run_id, "link_audit", progress=_overall_progress(done_phases, "", 0), message="ADA, link audit & SEO complete")
 
         # ---- Phase 7: Issue Matching ----
         if run.run_number > 1:

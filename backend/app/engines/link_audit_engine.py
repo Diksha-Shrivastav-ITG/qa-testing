@@ -215,7 +215,7 @@ class LinkAuditEngine:
                     "path": "/",
                 }])
 
-            await page.goto(page_url, wait_until="networkidle", timeout=30000)
+            await page.goto(page_url, wait_until="networkidle", timeout=15000)
             await asyncio.sleep(1)
 
             try:

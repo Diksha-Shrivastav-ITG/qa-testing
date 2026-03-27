@@ -185,7 +185,7 @@ class AccessibilityEngine:
             axe_succeeded = False
             try:
                 await page.add_script_tag(url=AXE_CDN)
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)
 
                 axe_raw = await page.evaluate(
                     """async () => {
