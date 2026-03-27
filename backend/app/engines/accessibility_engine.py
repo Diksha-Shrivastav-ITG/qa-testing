@@ -152,10 +152,12 @@ class AccessibilityEngine:
             await context.add_init_script(_WEBDRIVER_SCRIPT)
             page = await context.new_page()
 
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(page_url)
+            base_store = f"{parsed.scheme}://{parsed.netloc}"
+
             # Handle password-protected stores
             if password:
-                from urllib.parse import urlparse
-                base_store = f"{urlparse(page_url).scheme}://{urlparse(page_url).netloc}"
                 try:
                     await page.goto(f"{base_store}/password", wait_until="networkidle", timeout=20000)
                     pwd_input = page.locator("input[type='password']")
@@ -165,6 +167,16 @@ class AccessibilityEngine:
                         await page.wait_for_load_state("networkidle")
                 except Exception:
                     pass
+
+            # Set preview_theme_id cookie for unpublished theme previews
+            preview_id = parse_qs(parsed.query).get("preview_theme_id", [None])[0]
+            if preview_id:
+                await context.add_cookies([{
+                    "name": "preview_theme_id",
+                    "value": preview_id,
+                    "domain": parsed.netloc,
+                    "path": "/",
+                }])
 
             await page.goto(page_url, wait_until="networkidle", timeout=30000)
             await asyncio.sleep(2)

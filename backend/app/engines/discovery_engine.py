@@ -49,9 +49,11 @@ class DiscoveryEngine:
         )
         page = await context.new_page()
 
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(url)
+        base_store = f"{parsed.scheme}://{parsed.netloc}"
+
         if password:
-            from urllib.parse import urlparse
-            base_store = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
             try:
                 await page.goto(f"{base_store}/password", wait_until="networkidle", timeout=20000)
                 pwd_input = page.locator("input[type='password']")
@@ -62,7 +64,16 @@ class DiscoveryEngine:
             except Exception:
                 pass
 
-        # Navigate to the full URL (keep preview_theme_id for unpublished theme testing)
+        # Set preview_theme_id cookie for unpublished theme previews
+        preview_id = parse_qs(parsed.query).get("preview_theme_id", [None])[0]
+        if preview_id:
+            await context.add_cookies([{
+                "name": "preview_theme_id",
+                "value": preview_id,
+                "domain": parsed.netloc,
+                "path": "/",
+            }])
+
         await page.goto(url, wait_until="networkidle", timeout=30000)
         return page
 

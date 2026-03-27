@@ -14,6 +14,24 @@ from app.workers.celery_app import celery_app
 
 BREAKPOINTS = [375, 425, 768, 1024, 1280, 1440, 1920]
 
+
+def _build_page_url(base_url: str, path: str) -> str:
+    """Build a full URL from a base URL and a path, preserving query params like preview_theme_id."""
+    from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
+
+    parsed = urlparse(base_url)
+    # Combine the base path with the new path
+    new_path = path if path.startswith("/") else f"/{path}"
+    # Rebuild URL with the new path but keep all query params
+    return urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        new_path,
+        parsed.params,
+        parsed.query,  # preserves preview_theme_id etc.
+        parsed.fragment,
+    ))
+
 # Phase weights for overall progress calculation (must sum to 1.0)
 PHASE_WEIGHTS = {
     "discovery": 0.05,
@@ -292,7 +310,7 @@ async def _run_qa_job_async(
                 return
 
             page_name = shopify_path.strip("/") or "home"
-            shopify_url = project.shopify_url.rstrip("/") + shopify_path
+            shopify_url = _build_page_url(project.shopify_url, shopify_path)
 
             # Always capture Shopify
             shopify_results = await capture_engine.capture_page(
@@ -472,7 +490,7 @@ async def _run_qa_job_async(
         os.makedirs(func_output_dir, exist_ok=True)
 
         first_shopify_path = list(page_mappings.keys())[0]
-        func_url = project.shopify_url.rstrip("/") + first_shopify_path
+        func_url = _build_page_url(project.shopify_url, first_shopify_path)
         first_page_name = first_shopify_path.strip("/") or "home"
 
         try:
@@ -525,7 +543,7 @@ async def _run_qa_job_async(
                     continue
                 pages_tested.add(page_name)
 
-                page_url = project.shopify_url.rstrip("/") + shopify_path
+                page_url = _build_page_url(project.shopify_url, shopify_path)
                 _publish_fn(run_id, "accessibility",
                             progress=_overall_progress(done_phases, "accessibility", 0.3),
                             message=f"ADA check: {page_name}")
@@ -567,7 +585,7 @@ async def _run_qa_job_async(
                     return
 
                 page_name = shopify_path.strip("/") or "home"
-                page_url = project.shopify_url.rstrip("/") + shopify_path
+                page_url = _build_page_url(project.shopify_url, shopify_path)
                 _publish_fn(run_id, "link_audit",
                             progress=_overall_progress(done_phases, "link_audit", 0.5),
                             message=f"Link audit: {page_name}")

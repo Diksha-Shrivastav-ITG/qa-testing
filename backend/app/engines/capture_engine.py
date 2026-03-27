@@ -233,13 +233,13 @@ class CaptureEngine:
             )
             page = await context.new_page()
 
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(url)
+            base_store = f"{parsed.scheme}://{parsed.netloc}"
+            domain = parsed.netloc
+
             # Handle password-protected Shopify stores
             if password:
-                from urllib.parse import urlparse
-                parsed = urlparse(url)
-                base_store = f"{parsed.scheme}://{parsed.netloc}"
-
-                # Go to password page first, enter the store password
                 try:
                     await page.goto(f"{base_store}/password", wait_until="networkidle", timeout=20000)
                     pwd_input = page.locator("input[type='password']")
@@ -251,7 +251,18 @@ class CaptureEngine:
                 except Exception:
                     pass
 
-            # Navigate to the FULL target URL (keep preview_theme_id and all params)
+            # Set preview_theme_id cookie for unpublished theme previews
+            query_params = parse_qs(parsed.query)
+            preview_id = query_params.get("preview_theme_id", [None])[0]
+            if preview_id:
+                await context.add_cookies([{
+                    "name": "preview_theme_id",
+                    "value": preview_id,
+                    "domain": domain,
+                    "path": "/",
+                }])
+
+            # Navigate to the target URL
             await page.goto(url, wait_until="networkidle", timeout=30000)
 
             # Inject cleanup CSS to suppress UI noise
