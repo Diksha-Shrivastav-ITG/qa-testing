@@ -11,10 +11,25 @@ from playwright.async_api import async_playwright
 # ---------------------------------------------------------------------------
 
 CLEANUP_CSS = """
-/* Hide Shopify preview bar */
+/* Hide Shopify preview bar (all variants) */
 #preview-bar-iframe,
-.shopify-preview-bar {
+.shopify-preview-bar,
+#shopify-theme-controls,
+[id*="preview-bar"],
+[class*="preview-bar"],
+iframe[src*="preview-bar"],
+.theme-preview-bar,
+[data-preview-bar],
+x-shopify-y { /* Shopify custom element for preview */
     display: none !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+}
+/* Remove top padding/margin that the preview bar adds to body */
+body {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
 }
 
 /* Hide common cookie banners */
