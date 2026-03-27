@@ -479,6 +479,121 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
           {sub_html}
         </div>"""
 
+    # ── SECTION: SEO Analysis ──
+    from app.models.seo_result import SeoResult as SeoResultModel, PerformanceResult
+    seo_results = db.query(SeoResultModel).filter(SeoResultModel.qa_run_id == run_id).order_by(SeoResultModel.page).all()
+    perf_results = db.query(PerformanceResult).filter(PerformanceResult.qa_run_id == run_id).order_by(PerformanceResult.page).all()
+
+    if seo_results:
+        section_num += 1
+        seo_passed = sum(1 for s in seo_results if s.passed)
+        seo_failed = sum(1 for s in seo_results if not s.passed)
+
+        by_page_seo: dict[str, list] = defaultdict(list)
+        for sr in seo_results:
+            by_page_seo[sr.page or "home"].append(sr)
+
+        seo_sub_html = ""
+        for page, page_srs in by_page_seo.items():
+            page_label = _page_label(page)
+            rows = ""
+            for sr in page_srs:
+                icon = "✅" if sr.passed else "❌"
+                rec = f'<div style="font-size:0.75rem;color:#d97706;margin-top:2px;">{_esc(sr.recommendation)}</div>' if sr.recommendation else ""
+                sev_html = ""
+                if sr.severity and not sr.passed:
+                    sev_c = {"critical": "#dc2626", "major": "#d97706", "minor": "#ca8a04"}.get(sr.severity, "#6b7280")
+                    sev_html = f'<span style="color:#fff;background:{sev_c};padding:1px 6px;border-radius:10px;font-size:0.6rem;font-weight:700;margin-left:6px;">{sr.severity.upper()}</span>'
+                rows += f"""
+                <tr style="border-bottom:1px solid #f3f4f6;">
+                  <td style="padding:8px;font-size:0.85rem;">{icon}</td>
+                  <td style="padding:8px;font-size:0.85rem;font-weight:600;color:#1f2937;">{_esc(sr.label)}{sev_html}</td>
+                  <td style="padding:8px;font-size:0.8rem;color:#4b5563;">{_esc(sr.value)}</td>
+                </tr>
+                {f'<tr><td></td><td colspan="2" style="padding:0 8px 8px;">{rec}</td></tr>' if rec else ''}"""
+
+            seo_sub_html += f"""
+            <div style="margin-bottom:1.5rem;">
+              <h3 style="font-family:-apple-system,sans-serif;font-size:0.95rem;font-weight:700;color:#374151;margin-bottom:0.5rem;">{page_label}</h3>
+              <table style="width:100%;border-collapse:collapse;font-family:-apple-system,sans-serif;">
+                <tbody>{rows}</tbody>
+              </table>
+            </div>"""
+
+        sections_html += f"""
+        <div class="section">
+          <h2 class="sec-title"><span class="sec-icon">🔍</span>{section_num}. SEO Analysis <span class="count-badge" style="background:#16a34a;">{seo_passed} passed</span> {f'<span class="count-badge">{seo_failed} issues</span>' if seo_failed else ''}</h2>
+          {seo_sub_html}
+        </div>"""
+
+    # ── SECTION: Performance ──
+    if perf_results:
+        section_num += 1
+        import json as _json
+
+        perf_sub_html = ""
+        for pr in perf_results:
+            page_label = _page_label(pr.page or "home")
+            load_color = "#dc2626" if pr.load_time_ms > 5000 else "#d97706" if pr.load_time_ms > 3000 else "#16a34a"
+            ttfb_color = "#d97706" if pr.ttfb_ms > 600 else "#16a34a"
+            size_mb = pr.total_size_bytes / 1024 / 1024
+            size_color = "#dc2626" if size_mb > 5 else "#16a34a"
+
+            def _fmt_b(b: int) -> str:
+                return f"{b/1024/1024:.1f} MB" if b > 1024*1024 else f"{b/1024:.0f} KB"
+
+            def _fmt_ms(ms: int) -> str:
+                return f"{ms/1000:.1f}s" if ms > 1000 else f"{ms}ms"
+
+            perf_issues = _json.loads(pr.issues_json) if pr.issues_json else []
+            issues_html = ""
+            for pi in perf_issues:
+                pi_sev_c = {"critical": "#dc2626", "major": "#d97706", "minor": "#ca8a04"}.get(pi.get("severity", ""), "#6b7280")
+                issues_html += f"""
+                <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;margin-top:6px;font-family:-apple-system,sans-serif;">
+                  <div style="font-size:0.8rem;font-weight:600;color:#92400e;">
+                    <span style="color:#fff;background:{pi_sev_c};padding:1px 6px;border-radius:10px;font-size:0.6rem;font-weight:700;margin-right:6px;">{pi.get('severity','').upper()}</span>
+                    {_esc(pi.get('label',''))}: {_esc(pi.get('value',''))}
+                  </div>
+                  <div style="font-size:0.75rem;color:#78350f;margin-top:2px;">{_esc(pi.get('recommendation',''))}</div>
+                </div>"""
+
+            perf_sub_html += f"""
+            <div style="margin-bottom:1.5rem;">
+              <h3 style="font-family:-apple-system,sans-serif;font-size:0.95rem;font-weight:700;color:#374151;margin-bottom:0.75rem;">{page_label}</h3>
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px;">
+                <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;font-family:-apple-system,sans-serif;">
+                  <div style="font-size:1.25rem;font-weight:800;color:{load_color};">{_fmt_ms(pr.load_time_ms)}</div>
+                  <div style="font-size:0.65rem;color:#9ca3af;text-transform:uppercase;font-weight:600;">Load Time</div>
+                </div>
+                <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;font-family:-apple-system,sans-serif;">
+                  <div style="font-size:1.25rem;font-weight:800;color:{ttfb_color};">{_fmt_ms(pr.ttfb_ms)}</div>
+                  <div style="font-size:0.65rem;color:#9ca3af;text-transform:uppercase;font-weight:600;">TTFB</div>
+                </div>
+                <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;font-family:-apple-system,sans-serif;">
+                  <div style="font-size:1.25rem;font-weight:800;color:{size_color};">{_fmt_b(pr.total_size_bytes)}</div>
+                  <div style="font-size:0.65rem;color:#9ca3af;text-transform:uppercase;font-weight:600;">Page Size</div>
+                </div>
+                <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;font-family:-apple-system,sans-serif;">
+                  <div style="font-size:1.25rem;font-weight:800;color:#1f2937;">{pr.total_resources}</div>
+                  <div style="font-size:0.65rem;color:#9ca3af;text-transform:uppercase;font-weight:600;">Requests</div>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-family:-apple-system,sans-serif;font-size:0.75rem;color:#6b7280;margin-bottom:8px;">
+                <div>JS: {pr.js_count} files ({_fmt_b(pr.js_size_bytes)})</div>
+                <div>CSS: {pr.css_count} files ({_fmt_b(pr.css_size_bytes)})</div>
+                <div>Images: {pr.img_count} ({_fmt_b(pr.img_size_bytes)})</div>
+              </div>
+              <div style="font-family:-apple-system,sans-serif;font-size:0.75rem;color:#6b7280;">DOM Nodes: {pr.dom_nodes}</div>
+              {issues_html}
+            </div>"""
+
+        sections_html += f"""
+        <div class="section">
+          <h2 class="sec-title"><span class="sec-icon">⚡</span>{section_num}. Performance Metrics</h2>
+          {perf_sub_html}
+        </div>"""
+
     # ── No issues ──
     if not sections_html:
         sections_html = '<div class="section"><p style="color:#16a34a;font-size:1.1rem;text-align:center;padding:2rem;">✅ No issues found. QA Passed!</p></div>'
