@@ -11,10 +11,25 @@ from playwright.async_api import async_playwright
 # ---------------------------------------------------------------------------
 
 CLEANUP_CSS = """
-/* Hide Shopify preview bar */
+/* Hide Shopify preview bar (all variants) */
 #preview-bar-iframe,
-.shopify-preview-bar {
+.shopify-preview-bar,
+#shopify-theme-controls,
+[id*="preview-bar"],
+[class*="preview-bar"],
+iframe[src*="preview-bar"],
+.theme-preview-bar,
+[data-preview-bar],
+x-shopify-y { /* Shopify custom element for preview */
     display: none !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+}
+/* Remove top padding/margin that the preview bar adds to body */
+body {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
 }
 
 /* Hide common cookie banners */
@@ -233,14 +248,36 @@ class CaptureEngine:
             )
             page = await context.new_page()
 
-            # Handle password-protected Shopify stores
-            if password and "myshopify.com" in url:
-                await page.goto(url, wait_until="networkidle", timeout=30000)
-                await page.fill("input[type='password']", password)
-                await page.click("button[type='submit'], input[type='submit']")
-                await page.wait_for_load_state("networkidle")
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(url)
+            base_store = f"{parsed.scheme}://{parsed.netloc}"
+            domain = parsed.netloc
 
-            # Navigate to target URL
+            # Handle password-protected Shopify stores
+            if password:
+                try:
+                    await page.goto(f"{base_store}/password", wait_until="networkidle", timeout=20000)
+                    pwd_input = page.locator("input[type='password']")
+                    if await pwd_input.is_visible(timeout=3000):
+                        await pwd_input.fill(password)
+                        await page.locator("button[type='submit'], input[type='submit']").click()
+                        await page.wait_for_load_state("networkidle")
+                        await asyncio.sleep(1)
+                except Exception:
+                    pass
+
+            # Set preview_theme_id cookie for unpublished theme previews
+            query_params = parse_qs(parsed.query)
+            preview_id = query_params.get("preview_theme_id", [None])[0]
+            if preview_id:
+                await context.add_cookies([{
+                    "name": "preview_theme_id",
+                    "value": preview_id,
+                    "domain": domain,
+                    "path": "/",
+                }])
+
+            # Navigate to the target URL
             await page.goto(url, wait_until="networkidle", timeout=30000)
 
             # Inject cleanup CSS to suppress UI noise

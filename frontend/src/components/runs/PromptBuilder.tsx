@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import api from "../../api/client";
 
 interface Issue {
   id: number;
@@ -20,6 +21,7 @@ interface AccItem {
 }
 
 interface PromptBuilderProps {
+  runId: number;
   issues: Issue[];
   accItems: AccItem[];
   projectName?: string;
@@ -27,7 +29,7 @@ interface PromptBuilderProps {
   onClose: () => void;
 }
 
-type Step = "select" | "generated";
+type Step = "select" | "loading" | "generated";
 
 const sevColor: Record<string, string> = {
   critical: "border-red-400 bg-red-50",
@@ -54,11 +56,13 @@ const pageLabel = (p: string) => {
   return p.replace(/^\//, "").split("/").map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(" > ");
 };
 
-const PromptBuilder = ({ issues, accItems, projectName, shopifyUrl, onClose }: PromptBuilderProps) => {
+const PromptBuilder = ({ runId, issues, accItems, projectName, shopifyUrl, onClose }: PromptBuilderProps) => {
   const [step, setStep] = useState<Step>("select");
   const [selectedIssues, setSelectedIssues] = useState<Set<number>>(new Set());
   const [selectedAcc, setSelectedAcc] = useState<Set<number>>(new Set());
+  const [generatedPrompt, setGeneratedPrompt] = useState("");
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Combine all items for the selection UI
   const allItems = useMemo(() => {
@@ -67,7 +71,6 @@ const PromptBuilder = ({ issues, accItems, projectName, shopifyUrl, onClose }: P
       severity: string;
       description: string;
       element?: string;
-      suggestion?: string;
       page: string;
       category: "issue" | "accessibility";
       originalId: number;
@@ -79,7 +82,6 @@ const PromptBuilder = ({ issues, accItems, projectName, shopifyUrl, onClose }: P
         severity: i.severity,
         description: i.description,
         element: i.element_selector,
-        suggestion: i.ai_suggestion,
         page: i.page ?? "home",
         category: "issue",
         originalId: i.id,
@@ -92,7 +94,6 @@ const PromptBuilder = ({ issues, accItems, projectName, shopifyUrl, onClose }: P
         severity: a.severity,
         description: a.description,
         element: a.element,
-        suggestion: a.wcag ? `Fix WCAG ${a.wcag} violation` : undefined,
         page: a.page,
         category: "accessibility",
         originalId: a.id,
@@ -149,45 +150,25 @@ const PromptBuilder = ({ issues, accItems, projectName, shopifyUrl, onClose }: P
 
   const totalSelected = selectedIssues.size + selectedAcc.size;
 
-  // Generate the prompt
-  const generatedPrompt = useMemo(() => {
-    const selectedItems = allItems.filter(item => isSelected(item));
-    if (selectedItems.length === 0) return "";
+  // Call Groq AI via backend to generate the prompt
+  const handleGenerate = async () => {
+    setStep("loading");
+    setError(null);
 
-    const grouped: Record<string, typeof allItems> = {};
-    selectedItems.forEach(item => {
-      (grouped[item.page] ??= []).push(item);
-    });
-
-    let prompt = `I need you to fix the following QA issues on my Shopify store.\n\n`;
-    prompt += `**Store:** ${shopifyUrl || "my Shopify store"}\n`;
-    if (projectName) prompt += `**Project:** ${projectName}\n`;
-    prompt += `**Total issues to fix:** ${selectedItems.length}\n\n`;
-    prompt += `---\n\n`;
-
-    let issueNum = 0;
-    for (const [page, items] of Object.entries(grouped)) {
-      prompt += `## ${pageLabel(page)}\n\n`;
-      for (const item of items) {
-        issueNum++;
-        prompt += `### Issue ${issueNum} [${item.severity.toUpperCase()}]\n`;
-        prompt += `**Problem:** ${item.description}\n`;
-        if (item.element) prompt += `**Element:** ${item.element}\n`;
-        if (item.suggestion) prompt += `**Suggested fix:** ${item.suggestion}\n`;
-        prompt += `\n`;
-      }
+    try {
+      const res = await api.post(`/api/runs/${runId}/generate-prompt`, {
+        issue_ids: Array.from(selectedIssues),
+        acc_ids: Array.from(selectedAcc),
+        project_name: projectName,
+        shopify_url: shopifyUrl,
+      });
+      setGeneratedPrompt(res.data.prompt);
+      setStep("generated");
+    } catch (err) {
+      setError("Failed to generate prompt. Please try again.");
+      setStep("select");
     }
-
-    prompt += `---\n\n`;
-    prompt += `**Instructions:**\n`;
-    prompt += `- Fix each issue listed above in the Shopify theme code (Liquid, CSS, or JS as needed).\n`;
-    prompt += `- For each fix, explain what file you changed and why.\n`;
-    prompt += `- Prioritize critical issues first, then major, then minor.\n`;
-    prompt += `- Make sure fixes don't break existing functionality.\n`;
-    prompt += `- Test responsive behavior after changes.\n`;
-
-    return prompt;
-  }, [allItems, selectedIssues, selectedAcc, projectName, shopifyUrl]);
+  };
 
   const handleCopy = async () => {
     try {
@@ -195,7 +176,6 @@ const PromptBuilder = ({ issues, accItems, projectName, shopifyUrl, onClose }: P
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Fallback
       const textarea = document.createElement("textarea");
       textarea.value = generatedPrompt;
       document.body.appendChild(textarea);
@@ -214,11 +194,13 @@ const PromptBuilder = ({ issues, accItems, projectName, shopifyUrl, onClose }: P
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between shrink-0">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
-              {step === "select" ? "Select Issues to Fix" : "Your Fix Prompt"}
+              {step === "select" ? "Select Issues to Fix" : step === "loading" ? "Generating Prompt..." : "AI-Generated Fix Prompt"}
             </h2>
             <p className="text-sm text-gray-500 mt-0.5">
               {step === "select"
                 ? "Choose which issues you want Claude to fix"
+                : step === "loading"
+                ? "Groq AI is analyzing the issues and writing the fix prompt..."
                 : "Copy this prompt and paste it in Claude Code or VS Code Claude"}
             </p>
           </div>
@@ -229,6 +211,10 @@ const PromptBuilder = ({ issues, accItems, projectName, shopifyUrl, onClose }: P
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {step === "select" && (
             <div className="space-y-4">
+              {error && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2">{error}</div>
+              )}
+
               {/* Quick actions */}
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-500">
@@ -298,8 +284,25 @@ const PromptBuilder = ({ issues, accItems, projectName, shopifyUrl, onClose }: P
             </div>
           )}
 
+          {step === "loading" && (
+            <div className="flex flex-col items-center justify-center py-16 space-y-4">
+              <div className="w-12 h-12 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin" />
+              <div className="text-center">
+                <p className="text-sm font-medium text-gray-700">AI is generating your fix prompt...</p>
+                <p className="text-xs text-gray-400 mt-1">Groq AI is analyzing {totalSelected} issues and writing specific code fixes</p>
+              </div>
+            </div>
+          )}
+
           {step === "generated" && (
             <div className="space-y-4">
+              <div className="flex items-center gap-2 text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Generated by Groq AI ({totalSelected} issues analyzed)
+              </div>
+
               <div className="bg-gray-900 rounded-lg p-4 overflow-auto max-h-[50vh]">
                 <pre className="text-sm text-gray-100 whitespace-pre-wrap font-mono leading-relaxed">
                   {generatedPrompt}
@@ -309,7 +312,7 @@ const PromptBuilder = ({ issues, accItems, projectName, shopifyUrl, onClose }: P
               <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-800">
                 <strong>How to use:</strong>
                 <ol className="mt-1 ml-4 list-decimal space-y-1">
-                  <li>Click "Copy Prompt" below</li>
+                  <li>Click <strong>"Copy Prompt"</strong> below</li>
                   <li>Open <strong>Claude Code</strong> in your terminal or <strong>Claude for VS Code</strong></li>
                   <li>Paste the prompt — Claude will read your theme files and fix each issue</li>
                 </ol>
@@ -326,14 +329,20 @@ const PromptBuilder = ({ issues, accItems, projectName, shopifyUrl, onClose }: P
               <div className="flex gap-3">
                 <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
                 <button
-                  onClick={() => setStep("generated")}
+                  onClick={handleGenerate}
                   disabled={totalSelected === 0}
-                  className="px-5 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+                  className="px-5 py-2 text-sm font-medium text-white bg-gradient-to-r from-violet-600 to-indigo-600 rounded-lg hover:shadow-lg hover:shadow-violet-500/25 disabled:opacity-40 transition-all"
                 >
-                  Generate Prompt ({totalSelected})
+                  Generate with AI ({totalSelected})
                 </button>
               </div>
             </>
+          )}
+
+          {step === "loading" && (
+            <div className="w-full text-center">
+              <button onClick={() => setStep("select")} className="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+            </div>
           )}
 
           {step === "generated" && (
@@ -348,10 +357,10 @@ const PromptBuilder = ({ issues, accItems, projectName, shopifyUrl, onClose }: P
                 <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Close</button>
                 <button
                   onClick={handleCopy}
-                  className={`px-5 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  className={`px-5 py-2 text-sm font-medium rounded-lg transition-all ${
                     copied
                       ? "bg-green-600 text-white"
-                      : "bg-indigo-600 text-white hover:bg-indigo-700"
+                      : "bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:shadow-lg hover:shadow-violet-500/25"
                   }`}
                 >
                   {copied ? "Copied!" : "Copy Prompt"}

@@ -418,3 +418,109 @@ def get_run_link_audit(
         }
         for item in items
     ]
+
+
+# ---------------------------------------------------------------------------
+# AI Prompt Generation
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel
+
+
+class PromptGenerateRequest(BaseModel):
+    issue_ids: list[int] = []
+    acc_ids: list[int] = []
+    project_name: str | None = None
+    shopify_url: str | None = None
+
+
+@router.post("/api/runs/{run_id}/generate-prompt")
+async def generate_fix_prompt(
+    run_id: int,
+    body: PromptGenerateRequest,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> dict:
+    """Use Groq AI to generate a Claude Code fix prompt from selected issues."""
+    from app.config import settings
+    from app.models.accessibility_result import AccessibilityResult
+
+    _get_run_or_404(db, run_id)
+
+    # Gather selected issues
+    issues_text = ""
+    if body.issue_ids:
+        issues = db.query(Issue).filter(Issue.id.in_(body.issue_ids)).all()
+        for i, issue in enumerate(issues, 1):
+            sev = issue.severity.value if hasattr(issue.severity, "value") else str(issue.severity)
+            issues_text += f"\n{i}. [{sev.upper()}] {issue.description}"
+            if issue.element_selector:
+                issues_text += f"\n   Element: {issue.element_selector}"
+            if issue.ai_suggestion:
+                issues_text += f"\n   Suggestion: {issue.ai_suggestion}"
+            issues_text += f"\n   Page: {issue.page}"
+
+    # Gather selected accessibility issues
+    acc_text = ""
+    if body.acc_ids:
+        acc_items = db.query(AccessibilityResult).filter(AccessibilityResult.id.in_(body.acc_ids)).all()
+        for i, a in enumerate(acc_items, 1):
+            acc_text += f"\n{i}. [{a.severity.upper()}] {a.description}"
+            if a.element:
+                acc_text += f"\n   Element: {a.element}"
+            if a.wcag:
+                acc_text += f"\n   WCAG: {a.wcag}"
+            acc_text += f"\n   Page: {a.page}"
+
+    # Build the prompt for Groq
+    groq_prompt = f"""You are an expert Shopify theme developer. A QA team has found issues on a Shopify store and needs you to generate a detailed, actionable prompt that another AI developer (Claude Code / VS Code Claude) can use to fix ALL the issues.
+
+Store: {body.shopify_url or "Shopify store"}
+Project: {body.project_name or "QA Project"}
+
+=== QA ISSUES FOUND ===
+{issues_text if issues_text else "(none)"}
+
+=== ACCESSIBILITY ISSUES ===
+{acc_text if acc_text else "(none)"}
+
+Generate a comprehensive prompt that:
+1. Lists every issue with the EXACT file to edit (e.g., sections/header.liquid, assets/theme.css)
+2. Provides specific CSS/Liquid/JS code fixes for each issue
+3. Groups fixes by file so the developer can work file-by-file
+4. Includes before/after examples where helpful
+5. Prioritizes critical issues first
+6. Warns about potential side effects of each fix
+
+Format the output as a ready-to-paste prompt for Claude Code. Start with a clear instruction line, then list all fixes. Use markdown formatting.
+
+IMPORTANT: The prompt should be self-contained — the developer should be able to paste it directly into Claude Code and get all issues fixed without needing additional context."""
+
+    # Call Groq AI
+    try:
+        from groq import AsyncGroq
+
+        client = AsyncGroq(api_key=settings.groq_api_key)
+        response = await client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[{"role": "user", "content": groq_prompt}],
+            temperature=0.3,
+            max_tokens=4096,
+        )
+        ai_prompt = response.choices[0].message.content.strip()
+    except Exception as exc:
+        # Fallback: generate a basic prompt without AI
+        ai_prompt = _fallback_prompt(body, issues_text, acc_text)
+
+    return {"prompt": ai_prompt}
+
+
+def _fallback_prompt(body: PromptGenerateRequest, issues_text: str, acc_text: str) -> str:
+    """Generate a basic prompt without AI if Groq fails."""
+    prompt = f"Fix the following QA issues on my Shopify store ({body.shopify_url or 'my store'}):\n"
+    if issues_text:
+        prompt += f"\n## QA Issues\n{issues_text}\n"
+    if acc_text:
+        prompt += f"\n## Accessibility Issues\n{acc_text}\n"
+    prompt += "\nFor each issue, find the relevant Liquid/CSS/JS file and apply the fix. Explain what you changed and why."
+    return prompt
