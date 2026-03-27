@@ -420,6 +420,53 @@ def get_run_link_audit(
     ]
 
 
+@router.get("/api/runs/{run_id}/seo")
+def get_run_seo(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list:
+    """Return SEO analysis results for a run."""
+    from app.models.seo_result import SeoResult as SeoResultModel
+    _get_run_or_404(db, run_id)
+    results = db.query(SeoResultModel).filter(SeoResultModel.qa_run_id == run_id).order_by(SeoResultModel.page).all()
+    return [
+        {
+            "id": r.id, "page": r.page, "test": r.test, "label": r.label,
+            "passed": r.passed, "value": r.value,
+            "recommendation": r.recommendation, "severity": r.severity,
+        }
+        for r in results
+    ]
+
+
+@router.get("/api/runs/{run_id}/performance")
+def get_run_performance(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list:
+    """Return performance metrics for a run."""
+    import json as _json
+    from app.models.seo_result import PerformanceResult
+    _get_run_or_404(db, run_id)
+    results = db.query(PerformanceResult).filter(PerformanceResult.qa_run_id == run_id).order_by(PerformanceResult.page).all()
+    return [
+        {
+            "id": r.id, "page": r.page,
+            "load_time_ms": r.load_time_ms, "dom_ready_ms": r.dom_ready_ms,
+            "ttfb_ms": r.ttfb_ms, "total_resources": r.total_resources,
+            "total_size_bytes": r.total_size_bytes,
+            "js_count": r.js_count, "js_size_bytes": r.js_size_bytes,
+            "css_count": r.css_count, "css_size_bytes": r.css_size_bytes,
+            "img_count": r.img_count, "img_size_bytes": r.img_size_bytes,
+            "dom_nodes": r.dom_nodes,
+            "issues": _json.loads(r.issues_json) if r.issues_json else [],
+        }
+        for r in results
+    ]
+
+
 # ---------------------------------------------------------------------------
 # AI Prompt Generation
 # ---------------------------------------------------------------------------

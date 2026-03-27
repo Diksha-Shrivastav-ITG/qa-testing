@@ -7,6 +7,7 @@ from app.models.issue import Issue, IssueType, IssueSeverity, IssueStatus
 from app.models.functional_test import FunctionalTest, FunctionalTestStatus
 from app.models.accessibility_result import AccessibilityResult
 from app.models.link_audit import LinkAudit
+from app.models.seo_result import SeoResult, PerformanceResult
 
 __all__ = [
     # Models
@@ -19,6 +20,8 @@ __all__ = [
     "FunctionalTest",
     "AccessibilityResult",
     "LinkAudit",
+    "SeoResult",
+    "PerformanceResult",
     # Enums
     "UserRole",
     "SourceType",

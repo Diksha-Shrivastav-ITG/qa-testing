@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.models.functional_test import FunctionalTest
     from app.models.issue import Issue
     from app.models.link_audit import LinkAudit
+    from app.models.seo_result import PerformanceResult, SeoResult
     from app.models.project import Project
 
 
@@ -61,4 +62,10 @@ class QaRun(Base):
     )
     link_audits: Mapped[list[LinkAudit]] = relationship(
         "LinkAudit", back_populates="qa_run", cascade="all, delete-orphan"
+    )
+    seo_results: Mapped[list[SeoResult]] = relationship(
+        "SeoResult", back_populates="qa_run", cascade="all, delete-orphan"
+    )
+    performance_results: Mapped[list[PerformanceResult]] = relationship(
+        "PerformanceResult", back_populates="qa_run", cascade="all, delete-orphan"
     )

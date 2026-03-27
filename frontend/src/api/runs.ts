@@ -28,3 +28,9 @@ export const getAccessibility = (runId: number) =>
 
 export const getLinkAudit = (runId: number) =>
   api.get(`/api/runs/${runId}/link-audit`);
+
+export const getSeo = (runId: number) =>
+  api.get(`/api/runs/${runId}/seo`);
+
+export const getPerformance = (runId: number) =>
+  api.get(`/api/runs/${runId}/performance`);

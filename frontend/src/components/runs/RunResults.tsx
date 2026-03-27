@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getRun, getCaptures, getAccessibility, getLinkAudit } from "../../api/runs";
+import { getRun, getCaptures, getAccessibility, getLinkAudit, getSeo, getPerformance } from "../../api/runs";
 import { listIssues } from "../../api/issues";
 import { getProject } from "../../api/projects";
 import PromptBuilder from "./PromptBuilder";
@@ -612,6 +612,160 @@ const LinkAuditSection = ({ items, sectionNum }: LinkSectionProps) => {
   );
 };
 
+// ---------- SEO Section ----------
+
+interface SeoItem {
+  id: number;
+  page: string;
+  test: string;
+  label: string;
+  passed: boolean;
+  value: string;
+  recommendation?: string;
+  severity?: string;
+}
+
+const SeoSection = ({ items, sectionNum }: { items: SeoItem[]; sectionNum: number }) => {
+  const passed = items.filter((i) => i.passed).length;
+  const failed = items.filter((i) => !i.passed).length;
+  const grouped = groupBy(items, (i) => i.page);
+
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <Collapsible
+        defaultOpen={failed > 0}
+        header={(open, toggle) => (
+          <button onClick={toggle} className="w-full flex items-center justify-between px-5 py-4 bg-gray-50 hover:bg-gray-100 text-left border-b border-gray-200">
+            <div className="flex items-center gap-3">
+              <span className="text-lg">🔍</span>
+              <span className="font-semibold text-gray-900">{sectionNum}. SEO Analysis</span>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">{passed} passed</span>
+              {failed > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">{failed} issues</span>}
+            </div>
+            <span className="text-gray-400">{open ? "▲" : "▼"}</span>
+          </button>
+        )}
+      >
+        <div className="p-4 space-y-4">
+          {Object.entries(grouped).map(([page, pageItems]) => (
+            <div key={page}>
+              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{pageLabel(page)}</h4>
+              <div className="space-y-1">
+                {pageItems.map((item) => (
+                  <div key={item.id} className={`flex items-start gap-3 px-3 py-2 rounded-lg text-sm ${item.passed ? "bg-green-50" : "bg-red-50"}`}>
+                    <span className="mt-0.5">{item.passed ? "✅" : "❌"}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900">{item.label}</span>
+                        {item.severity && !item.passed && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${sevStyle(item.severity)}`}>{item.severity}</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">{item.value}</p>
+                      {item.recommendation && <p className="text-xs text-orange-600 mt-0.5">{item.recommendation}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {items.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No SEO data</p>}
+        </div>
+      </Collapsible>
+    </div>
+  );
+};
+
+// ---------- Performance Section ----------
+
+interface PerfItem {
+  id: number;
+  page: string;
+  load_time_ms: number;
+  dom_ready_ms: number;
+  ttfb_ms: number;
+  total_resources: number;
+  total_size_bytes: number;
+  js_count: number;
+  js_size_bytes: number;
+  css_count: number;
+  css_size_bytes: number;
+  img_count: number;
+  img_size_bytes: number;
+  dom_nodes: number;
+  issues: Array<{ test: string; label: string; severity: string; value: string; recommendation: string }>;
+}
+
+const fmtBytes = (b: number) => b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${(b / 1024).toFixed(0)} KB`;
+const fmtMs = (ms: number) => ms > 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+
+const PerfSection = ({ items, sectionNum }: { items: PerfItem[]; sectionNum: number }) => {
+  const totalIssues = items.reduce((s, i) => s + (i.issues?.length ?? 0), 0);
+
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <Collapsible
+        defaultOpen={true}
+        header={(open, toggle) => (
+          <button onClick={toggle} className="w-full flex items-center justify-between px-5 py-4 bg-gray-50 hover:bg-gray-100 text-left border-b border-gray-200">
+            <div className="flex items-center gap-3">
+              <span className="text-lg">⚡</span>
+              <span className="font-semibold text-gray-900">{sectionNum}. Performance</span>
+              {totalIssues > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">{totalIssues} issues</span>}
+            </div>
+            <span className="text-gray-400">{open ? "▲" : "▼"}</span>
+          </button>
+        )}
+      >
+        <div className="p-4 space-y-4">
+          {items.map((p) => (
+            <div key={p.id}>
+              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">{pageLabel(p.page)}</h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
+                  <div className={`text-lg font-bold ${p.load_time_ms > 5000 ? "text-red-600" : p.load_time_ms > 3000 ? "text-orange-600" : "text-green-600"}`}>{fmtMs(p.load_time_ms)}</div>
+                  <div className="text-[10px] text-gray-500 uppercase">Load Time</div>
+                </div>
+                <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
+                  <div className={`text-lg font-bold ${p.ttfb_ms > 600 ? "text-orange-600" : "text-green-600"}`}>{fmtMs(p.ttfb_ms)}</div>
+                  <div className="text-[10px] text-gray-500 uppercase">TTFB</div>
+                </div>
+                <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
+                  <div className={`text-lg font-bold ${p.total_size_bytes > 5*1024*1024 ? "text-red-600" : "text-gray-900"}`}>{fmtBytes(p.total_size_bytes)}</div>
+                  <div className="text-[10px] text-gray-500 uppercase">Page Size</div>
+                </div>
+                <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
+                  <div className="text-lg font-bold text-gray-900">{p.total_resources}</div>
+                  <div className="text-[10px] text-gray-500 uppercase">Requests</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-xs text-gray-500 mb-3">
+                <div>JS: {p.js_count} files ({fmtBytes(p.js_size_bytes)})</div>
+                <div>CSS: {p.css_count} files ({fmtBytes(p.css_size_bytes)})</div>
+                <div>Images: {p.img_count} ({fmtBytes(p.img_size_bytes)})</div>
+              </div>
+              {p.issues?.length > 0 && (
+                <div className="space-y-1">
+                  {p.issues.map((issue, idx) => (
+                    <div key={idx} className="bg-orange-50 border border-orange-100 rounded px-3 py-2 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${sevStyle(issue.severity)}`}>{issue.severity}</span>
+                        <span className="font-medium text-gray-800">{issue.label}: {issue.value}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">{issue.recommendation}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+          {items.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No performance data</p>}
+        </div>
+      </Collapsible>
+    </div>
+  );
+};
+
 // ---------- Score Card ----------
 
 interface ScoreCardProps {
@@ -761,6 +915,18 @@ const RunResults = ({ runId }: RunResultsProps) => {
     enabled: !!runId,
   });
 
+  const { data: seoData } = useQuery<SeoItem[]>({
+    queryKey: ["seo", runId],
+    queryFn: () => getSeo(runId).then((r) => r.data),
+    enabled: !!runId,
+  });
+
+  const { data: perfData } = useQuery<PerfItem[]>({
+    queryKey: ["performance", runId],
+    queryFn: () => getPerformance(runId).then((r) => r.data),
+    enabled: !!runId,
+  });
+
   // Fetch project for threshold
   const { data: projectData } = useQuery({
     queryKey: ["project", run?.project_id],
@@ -794,6 +960,8 @@ const RunResults = ({ runId }: RunResultsProps) => {
   const captures: Capture[] = capturesData ?? [];
   const accItems: AccessibilityItem[] = accData ?? [];
   const linkItems: LinkAuditItem[] = linkData ?? [];
+  const seoItems: SeoItem[] = seoData ?? [];
+  const perfItems: PerfItem[] = perfData ?? [];
 
   // Group issues by page
   const issuesByPage = groupBy(issues, (i) => i.page ?? "home");
@@ -819,6 +987,8 @@ const RunResults = ({ runId }: RunResultsProps) => {
   // Section numbering: pages first, then accessibility, then link audit
   const accSectionNum = pagesWithIssues.length + 1;
   const linkSectionNum = pagesWithIssues.length + 2;
+  const seoSectionNum = pagesWithIssues.length + 3;
+  const perfSectionNum = pagesWithIssues.length + 4;
 
   return (
     <div className="space-y-6">
@@ -883,6 +1053,12 @@ const RunResults = ({ runId }: RunResultsProps) => {
 
       {/* Link Audit Section */}
       <LinkAuditSection items={linkItems} sectionNum={linkSectionNum} />
+
+      {/* SEO Section */}
+      <SeoSection items={seoItems} sectionNum={seoSectionNum} />
+
+      {/* Performance Section */}
+      <PerfSection items={perfItems} sectionNum={perfSectionNum} />
 
       {/* No issues at all */}
       {issues.length === 0 && accItems.length === 0 && (
