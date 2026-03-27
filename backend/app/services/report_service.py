@@ -332,15 +332,19 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
             items_html = ""
             for n, ar in enumerate(page_ars, 1):
                 sev = ar.severity
-                wcag_badge = (
-                    f'<span style="background:#eff6ff;color:#1d4ed8;padding:1px 8px;border-radius:12px;'
-                    f'font-size:0.7rem;font-weight:600;margin-left:0.5rem;">WCAG {ar.wcag}</span>'
-                    if ar.wcag else ""
+                # Short WCAG ref — just the first code like "wcag111"
+                wcag_short = ar.wcag.split(",")[0].strip() if ar.wcag else ""
+                wcag_html = (
+                    f'<div style="margin-top:0.25rem;"><span style="background:#eff6ff;color:#1d4ed8;padding:2px 8px;'
+                    f'border-radius:4px;font-size:0.65rem;font-weight:600;">WCAG {wcag_short}</span></div>'
+                    if wcag_short else ""
                 )
+                # Element — truncate and wrap
+                elem_text = (ar.element or "")[:80]
                 element_html = (
-                    f'<li><strong>Element:</strong> <code style="font-size:0.8rem;background:#f3f4f6;'
-                    f'padding:1px 4px;border-radius:3px;">{ar.element[:100]}</code></li>'
-                    if ar.element else ""
+                    f'<li><strong>Element:</strong> <code style="font-size:0.7rem;background:#f3f4f6;'
+                    f'padding:2px 6px;border-radius:3px;word-break:break-all;display:inline;">{elem_text}</code></li>'
+                    if elem_text else ""
                 )
                 help_html = (
                     f'<li><strong>How to fix:</strong> {ar.help_text}</li>'
@@ -351,9 +355,9 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
                   <div class="issue-header-row">
                     <span class="issue-label">ADA {section_num}.{sub_num}.{n}</span>
                     <span class="sev-pill" style="background:{_sev_colors_a.get(sev,'#999')};">{sev.upper()}</span>
-                    {wcag_badge}
                   </div>
                   <p class="issue-title">{ar.test_name.replace('-', ' ').replace('_', ' ').title()}</p>
+                  {wcag_html}
                   <ul class="issue-meta">
                     <li><strong>Issue:</strong> {ar.description}</li>
                     {element_html}
