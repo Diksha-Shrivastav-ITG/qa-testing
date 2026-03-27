@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import difflib
 from urllib.parse import urlparse
 
@@ -55,12 +56,12 @@ class DiscoveryEngine:
 
         if password:
             try:
-                await page.goto(f"{base_store}/password", wait_until="networkidle", timeout=20000)
+                await page.goto(f"{base_store}/password", wait_until="domcontentloaded", timeout=30000)
                 pwd_input = page.locator("input[type='password']")
                 if await pwd_input.is_visible(timeout=3000):
                     await pwd_input.fill(password)
                     await page.locator("button[type='submit'], input[type='submit']").click()
-                    await page.wait_for_load_state("networkidle")
+                    await page.wait_for_load_state("domcontentloaded")
             except Exception:
                 pass
 
@@ -74,19 +75,59 @@ class DiscoveryEngine:
                 "path": "/",
             }])
 
-        await page.goto(url, wait_until="networkidle", timeout=30000)
+        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
         return page
 
     # ------------------------------------------------------------------
     # JS snippet used to harvest internal links
+    # Collects: <a href>, data-href/data-url attributes, onclick patterns
+    # Deduplication by path is done inside JS — returns [{path, name}]
     # ------------------------------------------------------------------
 
     _LINK_JS = """
     () => {
         const origin = window.location.origin;
-        return Array.from(document.querySelectorAll('a[href]'))
-            .map(a => ({ href: a.href, text: (a.innerText || a.textContent || '').trim() }))
-            .filter(l => l.href.startsWith(origin));
+        const seen = new Set();
+        const results = [];
+
+        function add(href, text) {
+            if (!href) return;
+            try {
+                // Resolve relative URLs
+                const url = new URL(href, origin);
+                if (url.origin !== origin) return;
+                // Normalize: strip trailing slash (except root), ignore query/hash
+                const path = url.pathname.replace(/\\/$/, '') || '/';
+                if (seen.has(path)) return;
+                seen.add(path);
+                results.push({ path, name: (text || '').trim().substring(0, 80) });
+            } catch (e) {}
+        }
+
+        // 1. All <a href> links — covers nav, product cards, banners, footer
+        document.querySelectorAll('a[href]').forEach(a => {
+            add(a.href, a.innerText || a.textContent || '');
+        });
+
+        // 2. data-href / data-url — common in Shopify section blocks and app embeds
+        document.querySelectorAll('[data-href],[data-url]').forEach(el => {
+            const href = el.getAttribute('data-href') || el.getAttribute('data-url');
+            add(href, el.innerText || el.textContent || '');
+        });
+
+        // 3. onclick="window.location='...'" or "location.href='...'" — buttons, divs
+        document.querySelectorAll('[onclick]').forEach(el => {
+            const oc = el.getAttribute('onclick') || '';
+            const m = oc.match(/(?:window\\.location(?:\\.href)?\\s*=\\s*|location\\.href\\s*=\\s*)['"]([^'"]+)['"]/);
+            if (m) add(m[1], el.innerText || el.textContent || '');
+        });
+
+        // 4. <form action="..."> — search forms, login redirects
+        document.querySelectorAll('form[action]').forEach(f => {
+            add(f.getAttribute('action'), f.getAttribute('aria-label') || '');
+        });
+
+        return results;
     }
     """
 
@@ -101,31 +142,50 @@ class DiscoveryEngine:
     ) -> list[dict]:
         """Discover internal pages of a Shopify store.
 
+        Scrolls the full homepage to trigger lazy-loaded content (product grids,
+        section blocks, etc.) before collecting links.
+
         Returns a de-duplicated list of ``{path, name}`` dicts, excluding
         paths that match :data:`SHOPIFY_SKIP_PREFIXES`.
         """
         page = await self._create_page(shopify_url, password=password)
+
+        # Scroll the full page to trigger lazy-loaded product cards and section blocks
+        try:
+            await page.evaluate("""
+                async () => {
+                    await new Promise(resolve => {
+                        let scrolled = 0;
+                        const step = 500;
+                        const timer = setInterval(() => {
+                            window.scrollBy(0, step);
+                            scrolled += step;
+                            if (scrolled >= document.body.scrollHeight) {
+                                clearInterval(timer);
+                                window.scrollTo(0, 0);
+                                resolve();
+                            }
+                        }, 80);
+                    });
+                }
+            """)
+            await asyncio.sleep(1)
+        except Exception:
+            pass
+
+        # _LINK_JS returns [{path, name}] already deduplicated by path
         raw_links: list[dict] = await page.evaluate(self._LINK_JS)
 
-        seen: set[str] = set()
         results: list[dict] = []
-
         for link in raw_links:
-            href = link.get("href", "")
-            text = (link.get("text") or "").strip()
-
-            parsed = urlparse(href)
-            path = parsed.path or "/"
+            path = link.get("path", "") or "/"
+            name = (link.get("name") or "").strip()
 
             # Skip unwanted Shopify paths
             if any(path.startswith(prefix) for prefix in SHOPIFY_SKIP_PREFIXES):
                 continue
 
-            if path in seen:
-                continue
-            seen.add(path)
-
-            results.append({"path": path, "name": text})
+            results.append({"path": path, "name": name})
 
         return results
 
@@ -136,23 +196,37 @@ class DiscoveryEngine:
         path filtering.
         """
         page = await self._create_page(framer_url)
+
+        try:
+            await page.evaluate("""
+                async () => {
+                    await new Promise(resolve => {
+                        let scrolled = 0;
+                        const step = 500;
+                        const timer = setInterval(() => {
+                            window.scrollBy(0, step);
+                            scrolled += step;
+                            if (scrolled >= document.body.scrollHeight) {
+                                clearInterval(timer);
+                                window.scrollTo(0, 0);
+                                resolve();
+                            }
+                        }, 80);
+                    });
+                }
+            """)
+            await asyncio.sleep(1)
+        except Exception:
+            pass
+
+        # _LINK_JS returns [{path, name}] already deduplicated by path
         raw_links: list[dict] = await page.evaluate(self._LINK_JS)
 
-        seen: set[str] = set()
         results: list[dict] = []
-
         for link in raw_links:
-            href = link.get("href", "")
-            text = (link.get("text") or "").strip()
-
-            parsed = urlparse(href)
-            path = parsed.path or "/"
-
-            if path in seen:
-                continue
-            seen.add(path)
-
-            results.append({"path": path, "name": text})
+            path = link.get("path", "") or "/"
+            name = (link.get("name") or "").strip()
+            results.append({"path": path, "name": name})
 
         return results
 

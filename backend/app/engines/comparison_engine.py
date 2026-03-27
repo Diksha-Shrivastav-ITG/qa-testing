@@ -135,7 +135,7 @@ class ComparisonResult:
 
 class ComparisonEngine:
     # Class-level semaphore: max 3 concurrent Groq calls across all instances
-    _groq_semaphore = asyncio.Semaphore(3)
+    _groq_semaphore = asyncio.Semaphore(5)  # Allow 5 concurrent Groq calls
 
     def __init__(self, groq_api_key: str, storage_path: str) -> None:
         self.groq_api_key = groq_api_key

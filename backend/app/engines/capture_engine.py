@@ -91,42 +91,26 @@ class CaptureEngine:
     def __init__(self, storage_path: str) -> None:
         self.storage_path = storage_path
 
-    async def _wait_for_page_stable(self, page, timeout_s: float = 30) -> None:
-        """Wait for page to fully load: scroll to trigger lazy-loading, wait for images, then settle.
-
-        Total wait is capped at timeout_s (default 30s).
-        """
+    async def _wait_for_page_stable(self, page, timeout_s: float = 8) -> None:
+        """Wait for page to load: quick scroll + wait for images. Capped at 8s total."""
         try:
             await asyncio.wait_for(self._do_page_stable(page), timeout=timeout_s)
         except (asyncio.TimeoutError, Exception):
-            pass  # hard timeout hit — continue with what we have
+            pass
 
     async def _do_page_stable(self, page) -> None:
-        """Internal: scroll, wait for images, wait for DOM quiet."""
-        # 1. Scroll slowly to bottom to trigger ALL lazy loading
+        """Quick scroll to trigger lazy loading, then wait for images."""
+        # Fast scroll to bottom and back
         await page.evaluate("""
-            () => new Promise(resolve => {
-                const totalHeight = document.body.scrollHeight;
-                let scrolled = 0;
-                const step = Math.max(300, Math.floor(totalHeight / 10));
-                const timer = setInterval(() => {
-                    scrolled += step;
-                    window.scrollTo(0, scrolled);
-                    if (scrolled >= totalHeight) {
-                        clearInterval(timer);
-                        setTimeout(resolve, 500);
-                    }
-                }, 200);
-                // Safety: max 15s for scrolling
-                setTimeout(() => { clearInterval(timer); resolve(); }, 15000);
-            })
+            () => {
+                window.scrollTo(0, document.body.scrollHeight);
+            }
         """)
-
-        # 2. Scroll back to top
+        await asyncio.sleep(0.5)
         await page.evaluate("window.scrollTo(0, 0)")
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
 
-        # 3. Wait for all images to finish loading (max 8s)
+        # Wait for images (max 3s)
         await page.evaluate("""
             () => new Promise(resolve => {
                 const images = Array.from(document.images);
@@ -139,12 +123,9 @@ class CaptureEngine:
                     else { img.addEventListener('load', check); img.addEventListener('error', check); }
                 });
                 if (loaded >= total) resolve();
-                setTimeout(resolve, 8000);
+                setTimeout(resolve, 3000);
             })
         """)
-
-        # 4. Final settle — let animations/transitions finish
-        await asyncio.sleep(2)
 
     async def capture_page(
         self,
@@ -256,12 +237,12 @@ class CaptureEngine:
             # Handle password-protected Shopify stores
             if password:
                 try:
-                    await page.goto(f"{base_store}/password", wait_until="networkidle", timeout=20000)
+                    await page.goto(f"{base_store}/password", wait_until="domcontentloaded", timeout=30000)
                     pwd_input = page.locator("input[type='password']")
                     if await pwd_input.is_visible(timeout=3000):
                         await pwd_input.fill(password)
                         await page.locator("button[type='submit'], input[type='submit']").click()
-                        await page.wait_for_load_state("networkidle")
+                        await page.wait_for_load_state("domcontentloaded")
                         await asyncio.sleep(1)
                 except Exception:
                     pass
@@ -278,7 +259,7 @@ class CaptureEngine:
                 }])
 
             # Navigate to the target URL
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
             # Inject cleanup CSS to suppress UI noise
             await page.add_style_tag(content=CLEANUP_CSS)

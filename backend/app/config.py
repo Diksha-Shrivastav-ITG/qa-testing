@@ -18,13 +18,14 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # Security
-    secret_key: str = "change-me-to-a-random-secret-key-at-least-32-chars"
+    secret_key: str = "IuqnCXYtJ9f4w0iV8UuuQwbkGiFyBvEedzIf9GTwEXW"
+
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
 
     # Admin credentials
-    admin_email: str = "admin@example.com"
-    admin_password: str = "changeme"
+    admin_email: str = "admin@itgeeks.com"
+    admin_password: str = "admin123"
 
     # External APIs
     groq_api_key: str = ""
