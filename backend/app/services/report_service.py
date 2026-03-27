@@ -36,6 +36,18 @@ SEV_COLORS = {"critical": "#dc2626", "major": "#d97706", "minor": "#ca8a04"}
 SEV_BG = {"critical": "#fef2f2", "major": "#fffbeb", "minor": "#fefce8"}
 
 
+def _esc(text: str) -> str:
+    """Escape HTML special characters to prevent broken layout."""
+    if not text:
+        return ""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
 def _storage_to_url(path: str | None, storage_base: str) -> str | None:
     if not path:
         return None
@@ -336,24 +348,27 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
             for n, ar in enumerate(page_ars, 1):
                 sev = ar.severity or "minor"
                 pill_style = _sev_pill_a.get(sev, "background:#6b7280;color:#fff;")
-                title = ar.test_name.replace('-', ' ').replace('_', ' ').title()
+                title = _esc(ar.test_name.replace('-', ' ').replace('_', ' ').title())
+                desc = _esc(ar.description or "")
 
-                # WCAG — just the primary reference
+                # WCAG — extract only wcagXXX references, skip category names
                 wcag_ref = ""
                 if ar.wcag:
-                    first_ref = ar.wcag.split(",")[0].strip()
-                    wcag_ref = f'<span style="display:inline-block;background:#eff6ff;color:#1d4ed8;padding:1px 8px;border-radius:3px;font-size:0.65rem;font-weight:600;margin-left:6px;">{first_ref}</span>'
+                    import re
+                    wcag_codes = re.findall(r'wcag\d[\w.]*', ar.wcag)
+                    if wcag_codes:
+                        wcag_ref = f'<span style="display:inline-block;background:#eff6ff;color:#1d4ed8;padding:1px 8px;border-radius:3px;font-size:0.65rem;font-weight:600;margin-left:4px;">WCAG {_esc(wcag_codes[0])}</span>'
 
-                # Element — keep short
+                # Element — escape HTML and keep short
                 elem_html = ""
                 if ar.element:
-                    short_elem = ar.element[:60] + ("..." if len(ar.element) > 60 else "")
+                    short_elem = _esc(ar.element[:60] + ("..." if len(ar.element) > 60 else ""))
                     elem_html = f'<div style="margin-top:6px;padding:4px 8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-family:monospace;font-size:0.7rem;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{short_elem}</div>'
 
                 # Fix suggestion
                 fix_html = ""
                 if ar.help_text:
-                    fix_html = f'<div style="margin-top:6px;font-size:0.8rem;color:#374151;"><strong style="color:#059669;">Fix:</strong> {ar.help_text}</div>'
+                    fix_html = f'<div style="margin-top:6px;font-size:0.8rem;color:#374151;"><strong style="color:#059669;">Fix:</strong> {_esc(ar.help_text)}</div>'
 
                 items_html += f"""
                 <div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#fff;page-break-inside:avoid;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
@@ -363,7 +378,7 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
                     {wcag_ref}
                   </div>
                   <div style="font-size:0.85rem;font-weight:700;color:#1f2937;margin-top:6px;">{title}</div>
-                  <div style="font-size:0.8rem;color:#4b5563;margin-top:4px;line-height:1.5;">{ar.description}</div>
+                  <div style="font-size:0.8rem;color:#4b5563;margin-top:4px;line-height:1.5;">{desc}</div>
                   {elem_html}
                   {fix_html}
                 </div>"""
