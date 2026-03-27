@@ -619,6 +619,52 @@ async def _run_qa_job_async(
         done_phases.append("link_audit")
         _publish_fn(run_id, "link_audit", progress=_overall_progress(done_phases, "", 0), message="Link audit complete")
 
+        # ---- Phase 6b: SEO & Performance ----
+        _publish_fn(run_id, "seo", progress=_overall_progress(done_phases, "link_audit", 0.8), message="Running SEO & performance checks")
+
+        try:
+            from app.engines.seo_engine import SeoPerformanceEngine
+            from app.models.seo_result import SeoResult as SeoResultModel, PerformanceResult
+
+            seo_engine = SeoPerformanceEngine()
+            seo_pages_tested = set()
+            for shopify_path in list(page_mappings.keys())[:3]:
+                page_name = shopify_path.strip("/") or "home"
+                if page_name in seo_pages_tested:
+                    continue
+                seo_pages_tested.add(page_name)
+                page_url = _build_page_url(project.shopify_url, shopify_path)
+
+                try:
+                    seo_result = await seo_engine.analyze_page(
+                        page_url=page_url,
+                        password=project.shopify_password,
+                    )
+                    for check in seo_result.seo_checks:
+                        db.add(SeoResultModel(
+                            qa_run_id=run_id, page=page_name,
+                            test=check.test, label=check.label,
+                            passed=check.passed, value=check.value,
+                            recommendation=check.recommendation, severity=check.severity,
+                        ))
+                    perf = seo_result.performance
+                    db.add(PerformanceResult(
+                        qa_run_id=run_id, page=page_name,
+                        load_time_ms=perf.load_time_ms, dom_ready_ms=perf.dom_ready_ms,
+                        ttfb_ms=perf.ttfb_ms, total_resources=perf.total_resources,
+                        total_size_bytes=perf.total_size_bytes,
+                        js_count=perf.js_count, js_size_bytes=perf.js_size_bytes,
+                        css_count=perf.css_count, css_size_bytes=perf.css_size_bytes,
+                        img_count=perf.img_count, img_size_bytes=perf.img_size_bytes,
+                        dom_nodes=perf.dom_nodes,
+                        issues_json=json.dumps(perf.issues) if perf.issues else None,
+                    ))
+                    db.commit()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         # ---- Phase 7: Issue Matching ----
         if run.run_number > 1:
             _publish_fn(run_id, "matching", progress=_overall_progress(done_phases, "matching", 0), message="Matching issues with previous run")

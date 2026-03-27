@@ -36,6 +36,18 @@ SEV_COLORS = {"critical": "#dc2626", "major": "#d97706", "minor": "#ca8a04"}
 SEV_BG = {"critical": "#fef2f2", "major": "#fffbeb", "minor": "#fefce8"}
 
 
+def _esc(text: str) -> str:
+    """Escape HTML special characters to prevent broken layout."""
+    if not text:
+        return ""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
 def _storage_to_url(path: str | None, storage_base: str) -> str | None:
     if not path:
         return None
@@ -321,8 +333,11 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
         for ar in accessibility_results:
             by_page_a[ar.page or "home"].append(ar)
 
-        _sev_colors_a = {"critical": "#dc2626", "major": "#d97706", "minor": "#ca8a04"}
-        _sev_bg_a = {"critical": "#fef2f2", "major": "#fffbeb", "minor": "#fefce8"}
+        _sev_pill_a = {
+            "critical": "background:#dc2626;color:#fff;",
+            "major": "background:#d97706;color:#fff;",
+            "minor": "background:#ca8a04;color:#fff;",
+        }
 
         sub_html = ""
         sub_num = 0
@@ -331,46 +346,54 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
             page_label = _page_label(page)
             items_html = ""
             for n, ar in enumerate(page_ars, 1):
-                sev = ar.severity
-                wcag_badge = (
-                    f'<span style="background:#eff6ff;color:#1d4ed8;padding:1px 8px;border-radius:12px;'
-                    f'font-size:0.7rem;font-weight:600;margin-left:0.5rem;">WCAG {ar.wcag}</span>'
-                    if ar.wcag else ""
-                )
-                element_html = (
-                    f'<li><strong>Element:</strong> <code style="font-size:0.8rem;background:#f3f4f6;'
-                    f'padding:1px 4px;border-radius:3px;">{ar.element[:100]}</code></li>'
-                    if ar.element else ""
-                )
-                help_html = (
-                    f'<li><strong>How to fix:</strong> {ar.help_text}</li>'
-                    if ar.help_text else ""
-                )
+                sev = ar.severity or "minor"
+                pill_style = _sev_pill_a.get(sev, "background:#6b7280;color:#fff;")
+                title = _esc(ar.test_name.replace('-', ' ').replace('_', ' ').title())
+                desc = _esc(ar.description or "")
+
+                # WCAG — extract only wcagXXX references, skip category names
+                wcag_ref = ""
+                if ar.wcag:
+                    import re
+                    wcag_codes = re.findall(r'wcag\d[\w.]*', ar.wcag)
+                    if wcag_codes:
+                        wcag_ref = f'<span style="display:inline-block;background:#eff6ff;color:#1d4ed8;padding:1px 8px;border-radius:3px;font-size:0.65rem;font-weight:600;margin-left:4px;">WCAG {_esc(wcag_codes[0])}</span>'
+
+                # Element — escape HTML and keep short
+                elem_html = ""
+                if ar.element:
+                    short_elem = _esc(ar.element[:60] + ("..." if len(ar.element) > 60 else ""))
+                    elem_html = f'<div style="margin-top:6px;padding:4px 8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-family:monospace;font-size:0.7rem;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{short_elem}</div>'
+
+                # Fix suggestion
+                fix_html = ""
+                if ar.help_text:
+                    fix_html = f'<div style="margin-top:6px;font-size:0.8rem;color:#374151;"><strong style="color:#059669;">Fix:</strong> {_esc(ar.help_text)}</div>'
+
                 items_html += f"""
-                <div class="issue-block" style="border-left:4px solid {_sev_colors_a.get(sev,'#999')};background:{_sev_bg_a.get(sev,'#f9fafb')};">
-                  <div class="issue-header-row">
-                    <span class="issue-label">ADA {section_num}.{sub_num}.{n}</span>
-                    <span class="sev-pill" style="background:{_sev_colors_a.get(sev,'#999')};">{sev.upper()}</span>
-                    {wcag_badge}
+                <div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#fff;page-break-inside:avoid;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <span style="font-size:0.65rem;font-weight:700;color:#9ca3af;text-transform:uppercase;">ADA {section_num}.{sub_num}.{n}</span>
+                    <span style="{pill_style}padding:1px 10px;border-radius:20px;font-size:0.6rem;font-weight:700;text-transform:uppercase;">{sev}</span>
+                    {wcag_ref}
                   </div>
-                  <p class="issue-title">{ar.test_name.replace('-', ' ').replace('_', ' ').title()}</p>
-                  <ul class="issue-meta">
-                    <li><strong>Issue:</strong> {ar.description}</li>
-                    {element_html}
-                    {help_html}
-                  </ul>
+                  <div style="font-size:0.85rem;font-weight:700;color:#1f2937;margin-top:6px;">{title}</div>
+                  <div style="font-size:0.8rem;color:#4b5563;margin-top:4px;line-height:1.5;">{desc}</div>
+                  {elem_html}
+                  {fix_html}
                 </div>"""
+
             sub_html += f"""
-            <div class="subsection">
-              <h3 class="sub-title">{section_num}.{sub_num} {page_label} — {len(page_ars)} Issue{"s" if len(page_ars)!=1 else ""}</h3>
+            <div style="margin-bottom:1.5rem;">
+              <h3 style="font-family:-apple-system,sans-serif;font-size:0.95rem;font-weight:700;color:#374151;margin-bottom:0.75rem;padding-bottom:0.4rem;border-bottom:1px solid #f3f4f6;">{section_num}.{sub_num} {page_label} — {len(page_ars)} Issue{"s" if len(page_ars)!=1 else ""}</h3>
               {items_html}
             </div>"""
 
         sections_html += f"""
         <div class="section">
           <h2 class="sec-title"><span class="sec-icon">♿</span>{section_num}. ADA / Accessibility Compliance <span class="count-badge">{len(accessibility_results)}</span></h2>
-          <p style="font-family:-apple-system,sans-serif;font-size:0.875rem;color:#6b7280;margin-bottom:1rem;">
-            Based on WCAG 2.1 AA standards. Issues listed affect screen readers, keyboard navigation, and assistive technologies.
+          <p style="font-family:-apple-system,sans-serif;font-size:0.8rem;color:#6b7280;margin-bottom:1rem;">
+            Based on WCAG 2.1 AA standards. Issues affect screen readers, keyboard navigation, and assistive technologies.
           </p>
           {sub_html}
         </div>"""
@@ -437,9 +460,9 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
                 <table style="width:100%;border-collapse:collapse;font-family:-apple-system,sans-serif;font-size:0.85rem;">
                   <thead>
                     <tr style="background:#f3f4f6;text-align:left;">
-                      <th style="padding:8px;font-size:0.75rem;color:#6b7280;font-weight:600;width:35%;">ELEMENT / TEXT</th>
-                      <th style="padding:8px;font-size:0.75rem;color:#6b7280;font-weight:600;width:35%;">NAVIGATES TO</th>
-                      <th style="padding:8px;font-size:0.75rem;color:#6b7280;font-weight:600;">STATUS</th>
+                      <th style="padding:8px;font-size:0.7rem;color:#6b7280;font-weight:600;width:30%;">ELEMENT / TEXT</th>
+                      <th style="padding:8px;font-size:0.7rem;color:#6b7280;font-weight:600;width:35%;">NAVIGATES TO</th>
+                      <th style="padding:8px;font-size:0.7rem;color:#6b7280;font-weight:600;width:35%;">STATUS</th>
                     </tr>
                   </thead>
                   <tbody>{table_rows}</tbody>
@@ -474,8 +497,10 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
   <script>{auto_print_js}</script>
   <style>
     *{{box-sizing:border-box;margin:0;padding:0;}}
-    body{{font-family:Georgia,'Times New Roman',serif;background:#fff;color:#1a1a1a;line-height:1.6;}}
-    .page{{max-width:900px;margin:0 auto;padding:3rem 3.5rem;}}
+    body{{font-family:Georgia,'Times New Roman',serif;background:#fff;color:#1a1a1a;line-height:1.6;overflow-x:hidden;}}
+    .page{{max-width:900px;margin:0 auto;padding:2.5rem 2rem;overflow-x:hidden;}}
+    table{{table-layout:fixed;width:100%;}}
+    td,th{{overflow-wrap:break-word;word-break:break-word;}}
     /* Header */
     .report-header{{border-bottom:3px solid #1e3a5f;padding-bottom:1.5rem;margin-bottom:2rem;}}
     .report-title{{font-size:2rem;font-weight:700;color:#1e3a5f;display:flex;align-items:center;gap:0.5rem;margin-bottom:1.25rem;}}
@@ -483,12 +508,13 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
     .meta-table tr td:first-child{{font-weight:700;padding-right:1rem;white-space:nowrap;color:#6b7280;}}
     .meta-table tr td:last-child{{color:#111827;}}
     /* Score banner */
-    .score-banner{{background:#f0f4ff;border:2px solid #c7d2fe;border-radius:10px;padding:1.25rem 1.75rem;margin:2rem 0;display:flex;align-items:center;gap:2rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}}
-    .score-big{{font-size:3rem;font-weight:800;color:{score_color};line-height:1;}}
-    .score-label{{font-size:0.75rem;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;}}
-    .score-detail{{display:grid;grid-template-columns:repeat(3,auto);gap:0.5rem 2rem;}}
-    .score-detail .item .val{{font-size:1.25rem;font-weight:700;}}
-    .score-detail .item .lbl{{font-size:0.7rem;color:#9ca3af;text-transform:uppercase;}}
+    .score-banner{{background:#f0f4ff;border:2px solid #c7d2fe;border-radius:10px;padding:1.5rem;margin:2rem 0;display:flex;align-items:flex-start;gap:1.5rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;flex-wrap:wrap;}}
+    .score-big{{font-size:2.5rem;font-weight:800;color:{score_color};line-height:1;}}
+    .score-label{{font-size:0.7rem;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;}}
+    .score-detail{{display:grid;grid-template-columns:repeat(4,1fr);gap:0.5rem 1rem;}}
+    .score-detail .item{{text-align:center;}}
+    .score-detail .item .val{{font-size:1.1rem;font-weight:700;}}
+    .score-detail .item .lbl{{font-size:0.6rem;color:#9ca3af;text-transform:uppercase;}}
     .result-badge{{font-size:1.1rem;font-weight:700;color:{result_color};margin-top:0.25rem;}}
     /* Sections */
     .section{{margin:2.5rem 0;page-break-inside:avoid;}}
@@ -498,14 +524,14 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
     .subsection{{margin:1.25rem 0 1.75rem;}}
     .sub-title{{font-size:1.05rem;font-weight:700;color:#374151;margin-bottom:0.875rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}}
     /* Issue blocks */
-    .issue-block{{padding:0.875rem 1rem;border-radius:6px;margin-bottom:0.875rem;page-break-inside:avoid;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}}
-    .issue-header-row{{display:flex;align-items:center;gap:0.75rem;margin-bottom:0.4rem;}}
-    .issue-label{{font-size:0.75rem;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;}}
-    .sev-pill{{color:#fff;padding:2px 10px;border-radius:20px;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;}}
-    .issue-title{{font-size:0.95rem;font-weight:700;color:#1f2937;margin-bottom:0.5rem;}}
-    .issue-meta{{padding-left:1.25rem;font-size:0.875rem;color:#374151;}}
-    .issue-meta li{{margin-bottom:0.3rem;}}
-    .issue-meta code{{background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:0.8rem;}}
+    .issue-block{{padding:1rem 1.25rem;border-radius:8px;margin-bottom:1rem;page-break-inside:avoid;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;overflow:hidden;}}
+    .issue-header-row{{display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;flex-wrap:wrap;}}
+    .issue-label{{font-size:0.7rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;}}
+    .sev-pill{{color:#fff;padding:2px 10px;border-radius:20px;font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;}}
+    .issue-title{{font-size:0.9rem;font-weight:700;color:#1f2937;margin-bottom:0.5rem;line-height:1.4;overflow-wrap:break-word;}}
+    .issue-meta{{padding-left:1.25rem;font-size:0.875rem;color:#374151;overflow-wrap:break-word;word-break:break-word;}}
+    .issue-meta li{{margin-bottom:0.4rem;line-height:1.5;}}
+    .issue-meta code{{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:0.75rem;word-break:break-all;display:inline-block;max-width:100%;}}
     .bp-heading{{font-size:0.875rem;font-weight:700;color:#4f46e5;margin:1rem 0 0.5rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}}
     /* Screenshots */
     .screenshot-row{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0.75rem;margin:0.75rem 0;}}
