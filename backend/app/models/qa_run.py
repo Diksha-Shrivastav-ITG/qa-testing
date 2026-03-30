@@ -42,6 +42,9 @@ class QaRun(Base):
     completed_at: Mapped[str | None] = mapped_column(nullable=True)
     # "design" = compare vs Framer/Figma, "ai" = AI-only analysis (no design reference)
     test_mode: Mapped[str] = mapped_column(String(20), nullable=False, server_default="design")
+    # Comma-separated test types that were run, e.g. "qa,functional,ada,seo,performance,link_audit"
+    # NULL means Full QA mode (all tests)
+    test_types: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Relationships
     project: Mapped[Project] = relationship("Project", back_populates="runs")

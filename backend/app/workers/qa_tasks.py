@@ -221,8 +221,9 @@ async def _run_qa_job_async(
             db.commit()
             return
 
-        # Store test_mode on the run
+        # Store test_mode and test_types on the run
         run.test_mode = test_mode
+        run.test_types = ",".join(test_types) if test_types else None
         db.commit()
 
         run_dir = f"run_{run_id}"
