@@ -320,13 +320,19 @@ async () => {
 
     let sitemapOk = false;
     try {
-        const sitemapResp = await fetch('/sitemap.xml', { method: 'HEAD' });
+        const sitemapAc = new AbortController();
+        const sitemapTimer = setTimeout(() => sitemapAc.abort(), 5000);
+        const sitemapResp = await fetch('/sitemap.xml', { method: 'HEAD', signal: sitemapAc.signal });
+        clearTimeout(sitemapTimer);
         sitemapOk = sitemapResp.ok;
     } catch(e) {}
 
     let bingSiteAuthOk = false;
     try {
-        const bingAuthResp = await fetch('/BingSiteAuth.xml', { method: 'HEAD' });
+        const bingAc = new AbortController();
+        const bingTimer = setTimeout(() => bingAc.abort(), 5000);
+        const bingAuthResp = await fetch('/BingSiteAuth.xml', { method: 'HEAD', signal: bingAc.signal });
+        clearTimeout(bingTimer);
         bingSiteAuthOk = bingAuthResp.ok;
     } catch(e) {}
 
