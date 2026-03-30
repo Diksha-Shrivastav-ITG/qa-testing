@@ -20,7 +20,7 @@ _USER_AGENT = (
 # ---------------------------------------------------------------------------
 
 _SEO_PERF_JS = """
-() => {
+async () => {
     const results = { seo: [], performance: {} };
 
     // ===================== SEO CHECKS =====================
@@ -187,6 +187,229 @@ _SEO_PERF_JS = """
         recommendation: window.location.protocol !== 'https:' ? 'Switch to HTTPS — required for SEO ranking' : null,
         severity: window.location.protocol !== 'https:' ? 'critical' : null,
     });
+
+    // 13. Google Tag Manager (GTM)
+    const gtmObj = window.google_tag_manager;
+    const dataLayer = window.dataLayer;
+    const hasGtm = !!gtmObj && Array.isArray(dataLayer);
+    const gtmStarted = hasGtm && dataLayer.some(e => e && e.event === 'gtm.start');
+
+    // Extract all GTM container IDs from scripts
+    const allScripts = Array.from(document.querySelectorAll('script'));
+    const gtmIds = new Set();
+    allScripts.forEach(s => {
+        const matches = (s.src + (s.textContent || '')).match(/GTM-[A-Z0-9]+/g);
+        if (matches) matches.forEach(id => gtmIds.add(id));
+    });
+    const gtmIdList = Array.from(gtmIds);
+    const hasDuplicateGtm = gtmIdList.length > 1;
+
+    // Check for noscript fallback iframe
+    const noscripts = Array.from(document.querySelectorAll('noscript'));
+    const hasGtmNoscript = noscripts.some(ns => ns.innerHTML.includes('googletagmanager.com'));
+
+    // Main GTM check — passes if GTM is detected and firing
+    if (!hasGtm) {
+        results.seo.push({
+            test: 'gtm_check', label: 'Google Tag Manager (GTM)', pass: false,
+            value: '(not installed)',
+            recommendation: 'Install Google Tag Manager to manage marketing tags and tracking scripts',
+            severity: 'critical',
+        });
+    } else if (!gtmStarted) {
+        results.seo.push({
+            test: 'gtm_check', label: 'Google Tag Manager (GTM)', pass: false,
+            value: gtmIdList.length > 0 ? gtmIdList[0] + ' found but not firing' : 'GTM found but not firing',
+            recommendation: 'GTM container is present but not loading. Check the container snippet placement and ID.',
+            severity: 'major',
+        });
+    } else {
+        results.seo.push({
+            test: 'gtm_check', label: 'Google Tag Manager (GTM)', pass: true,
+            value: gtmIdList[0] + ' active' + (hasGtmNoscript ? ', noscript present' : ''),
+            recommendation: null, severity: null,
+        });
+    }
+
+    // Sub-warning: missing noscript fallback
+    if (hasGtm && gtmStarted && !hasGtmNoscript) {
+        results.seo.push({
+            test: 'gtm_noscript', label: 'GTM Noscript Fallback', pass: false,
+            value: 'Missing <noscript> iframe for GTM',
+            recommendation: 'Add the GTM noscript fallback iframe after the opening <body> tag for non-JS environments',
+            severity: 'minor',
+        });
+    }
+
+    // Sub-warning: duplicate containers
+    if (hasDuplicateGtm) {
+        results.seo.push({
+            test: 'gtm_duplicates', label: 'GTM Duplicate Containers', pass: false,
+            value: 'Multiple containers: ' + gtmIdList.join(', '),
+            recommendation: 'Multiple GTM containers detected. Use a single container to avoid conflicts and double-tracking.',
+            severity: 'minor',
+        });
+    }
+
+    // 14. Google Analytics 4 (GA4)
+    const hasGtagFn = typeof window.gtag === 'function';
+    const gtagScripts = allScripts.filter(s => s.src && s.src.includes('gtag/js'));
+    const hasGtagScript = gtagScripts.length > 0;
+
+    // Extract G-XXXXXX measurement IDs from inline scripts
+    const ga4Ids = new Set();
+    allScripts.forEach(s => {
+        const text = s.textContent || '';
+        const matches = text.match(/G-[A-Z0-9]+/g);
+        if (matches) matches.forEach(id => ga4Ids.add(id));
+    });
+    // Also extract from script src attributes
+    gtagScripts.forEach(s => {
+        const srcMatch = s.src.match(/id=(G-[A-Z0-9]+)/);
+        if (srcMatch) ga4Ids.add(srcMatch[1]);
+    });
+    const ga4IdList = Array.from(ga4Ids);
+
+    // Check for network requests to GA endpoints
+    const resourceEntries = performance.getEntriesByType('resource') || [];
+    const ga4Requests = resourceEntries.filter(e =>
+        e.name.includes('google-analytics.com') ||
+        e.name.includes('googletagmanager.com/gtag')
+    );
+    const isSendingData = ga4Requests.length > 0;
+
+    const ga4Detected = hasGtagFn || hasGtagScript || ga4IdList.length > 0;
+    const hasDuplicateGa4 = ga4IdList.length > 1;
+
+    // Main GA4 check
+    if (!ga4Detected) {
+        results.seo.push({
+            test: 'ga4_check', label: 'Google Analytics 4 (GA4)', pass: false,
+            value: '(not installed)',
+            recommendation: 'Install Google Analytics 4 to track website traffic and user behavior',
+            severity: 'critical',
+        });
+    } else if (!isSendingData) {
+        results.seo.push({
+            test: 'ga4_check', label: 'Google Analytics 4 (GA4)', pass: false,
+            value: ga4IdList.length > 0
+                ? 'GA4 script found (' + ga4IdList[0] + ') but not sending data'
+                : 'GA4 script found but not sending data',
+            recommendation: 'GA4 is installed but not sending data. Verify the measurement ID and gtag configuration.',
+            severity: 'major',
+        });
+    } else {
+        results.seo.push({
+            test: 'ga4_check', label: 'Google Analytics 4 (GA4)', pass: true,
+            value: 'GA4 active' + (ga4IdList.length > 0 ? ' (' + ga4IdList[0] + ')' : '') + ', sending data',
+            recommendation: null, severity: null,
+        });
+    }
+
+    // Sub-warning: duplicate tracking
+    if (hasDuplicateGa4) {
+        results.seo.push({
+            test: 'ga4_duplicates', label: 'GA4 Duplicate Tracking', pass: false,
+            value: 'Duplicate tracking: ' + ga4IdList.join(', '),
+            recommendation: 'Multiple GA4 measurement IDs detected. This causes double-counted pageviews and inflated metrics.',
+            severity: 'minor',
+        });
+    }
+
+    // ===================== ASYNC RESOURCE CHECKS =====================
+
+    let sitemapOk = false;
+    try {
+        const sitemapResp = await fetch('/sitemap.xml', { method: 'HEAD' });
+        sitemapOk = sitemapResp.ok;
+    } catch(e) {}
+
+    let bingSiteAuthOk = false;
+    try {
+        const bingAuthResp = await fetch('/BingSiteAuth.xml', { method: 'HEAD' });
+        bingSiteAuthOk = bingAuthResp.ok;
+    } catch(e) {}
+
+    // 15. Google Search Console (GSC)
+    const gscMeta = document.querySelector('meta[name="google-site-verification"]');
+    const gscContent = gscMeta ? (gscMeta.getAttribute('content') || '').trim() : '';
+    const hasGscVerification = gscContent.length > 0;
+
+    if (!hasGscVerification && !sitemapOk) {
+        results.seo.push({
+            test: 'gsc_check', label: 'Google Search Console Verification', pass: false,
+            value: '(verification tag missing)',
+            recommendation: 'Add <meta name="google-site-verification"> tag and ensure /sitemap.xml is accessible for Google Search Console',
+            severity: 'major',
+        });
+    } else if (!hasGscVerification) {
+        results.seo.push({
+            test: 'gsc_check', label: 'Google Search Console Verification', pass: false,
+            value: '(verification tag missing, sitemap.xml accessible)',
+            recommendation: 'Add <meta name="google-site-verification"> tag to verify site ownership in Google Search Console',
+            severity: 'major',
+        });
+    } else if (!sitemapOk) {
+        results.seo.push({
+            test: 'gsc_check', label: 'Google Search Console Verification', pass: false,
+            value: 'Verified, but /sitemap.xml not found',
+            recommendation: 'Sitemap.xml is missing or inaccessible. Submit a sitemap in Google Search Console for better indexing.',
+            severity: 'minor',
+        });
+    } else {
+        results.seo.push({
+            test: 'gsc_check', label: 'Google Search Console Verification', pass: true,
+            value: 'Verified, sitemap.xml accessible',
+            recommendation: null, severity: null,
+        });
+    }
+
+    // 16. Bing Webmaster Tools
+    const bingMeta = document.querySelector('meta[name="msvalidate.01"]');
+    const bingContent = bingMeta ? (bingMeta.getAttribute('content') || '').trim() : '';
+    const hasBingVerification = bingContent.length > 0;
+
+    // Check for bingbot-blocking directives (reuse robotsMeta from check 10)
+    const bingRobotsContent = robotsMeta ? (robotsMeta.getAttribute('content') || '').toLowerCase() : '';
+    const bingbotMeta = document.querySelector('meta[name="bingbot"]');
+    const bingbotContent = bingbotMeta ? (bingbotMeta.getAttribute('content') || '').toLowerCase() : '';
+    const bingbotBlocked = bingbotContent.includes('noindex') ||
+        (bingRobotsContent.includes('noindex') && !bingbotContent);
+
+    // Main Bing check
+    if (bingbotBlocked) {
+        results.seo.push({
+            test: 'bing_webmaster_check', label: 'Bing Webmaster Tools', pass: false,
+            value: bingbotContent.includes('noindex')
+                ? 'Bingbot blocked by <meta name="bingbot"> noindex'
+                : 'Bingbot blocked by <meta name="robots"> noindex',
+            recommendation: 'Bing is blocked from indexing this page. Remove the noindex directive if this is unintended.',
+            severity: 'critical',
+        });
+    } else if (!hasBingVerification) {
+        results.seo.push({
+            test: 'bing_webmaster_check', label: 'Bing Webmaster Tools', pass: false,
+            value: '(verification tag missing)',
+            recommendation: 'Add <meta name="msvalidate.01"> tag to verify site ownership in Bing Webmaster Tools',
+            severity: 'major',
+        });
+    } else {
+        results.seo.push({
+            test: 'bing_webmaster_check', label: 'Bing Webmaster Tools', pass: true,
+            value: 'Verified, no blocking directives',
+            recommendation: null, severity: null,
+        });
+    }
+
+    // Sub-warning: BingSiteAuth.xml missing
+    if (hasBingVerification && !bingSiteAuthOk) {
+        results.seo.push({
+            test: 'bing_siteauth', label: 'Bing Site Auth File', pass: false,
+            value: 'Verified, but /BingSiteAuth.xml not found',
+            recommendation: 'Add a BingSiteAuth.xml file to the site root as an alternative verification method for Bing',
+            severity: 'minor',
+        });
+    }
 
     // ===================== PERFORMANCE CHECKS =====================
 
