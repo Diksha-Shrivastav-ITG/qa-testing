@@ -596,12 +596,14 @@ async def _run_qa_job_async(
                         message=f"Checking {page_name}: ADA + links + SEO simultaneously")
 
             run_ada = _should_run("ada", test_types)
+            run_link_audit = _should_run("link_audit", test_types)
             run_seo_or_perf = _should_run("seo", test_types) or _should_run("performance", test_types)
 
             acc_results, link_items, seo_result = await asyncio.gather(
                 accessibility_engine.run_checks(page_url=page_url, password=project.shopify_password)
                 if run_ada else _empty_list(),
-                link_engine.audit_page(page_url=page_url, password=project.shopify_password),
+                link_engine.audit_page(page_url=page_url, password=project.shopify_password)
+                if run_link_audit else _empty_list(),
                 seo_engine.analyze_page(page_url=page_url, password=project.shopify_password)
                 if run_seo_or_perf else _empty_none(),
                 return_exceptions=True,
@@ -620,7 +622,7 @@ async def _run_qa_job_async(
                 except Exception:
                     pass
 
-            if not isinstance(link_items, Exception):
+            if run_link_audit and not isinstance(link_items, Exception):
                 try:
                     for item in link_items:
                         db.add(LinkAudit(
