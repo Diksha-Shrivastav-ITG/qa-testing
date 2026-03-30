@@ -251,6 +251,71 @@ async () => {
         });
     }
 
+    // 14. Google Analytics 4 (GA4)
+    const hasGtagFn = typeof window.gtag === 'function';
+    const gtagScripts = allScripts.filter(s => s.src && s.src.includes('gtag/js'));
+    const hasGtagScript = gtagScripts.length > 0;
+
+    // Extract G-XXXXXX measurement IDs from inline scripts
+    const ga4Ids = new Set();
+    allScripts.forEach(s => {
+        const text = s.textContent || '';
+        const matches = text.match(/G-[A-Z0-9]+/g);
+        if (matches) matches.forEach(id => ga4Ids.add(id));
+    });
+    // Also extract from script src attributes
+    gtagScripts.forEach(s => {
+        const srcMatch = s.src.match(/id=(G-[A-Z0-9]+)/);
+        if (srcMatch) ga4Ids.add(srcMatch[1]);
+    });
+    const ga4IdList = Array.from(ga4Ids);
+
+    // Check for network requests to GA endpoints
+    const resourceEntries = performance.getEntriesByType('resource') || [];
+    const ga4Requests = resourceEntries.filter(e =>
+        e.name.includes('google-analytics.com') ||
+        e.name.includes('googletagmanager.com/gtag')
+    );
+    const isSendingData = ga4Requests.length > 0;
+
+    const ga4Detected = hasGtagFn || hasGtagScript || ga4IdList.length > 0;
+    const hasDuplicateGa4 = ga4IdList.length > 1;
+
+    // Main GA4 check
+    if (!ga4Detected) {
+        results.seo.push({
+            test: 'ga4_check', label: 'Google Analytics 4 (GA4)', pass: false,
+            value: '(not installed)',
+            recommendation: 'Install Google Analytics 4 to track website traffic and user behavior',
+            severity: 'critical',
+        });
+    } else if (!isSendingData) {
+        results.seo.push({
+            test: 'ga4_check', label: 'Google Analytics 4 (GA4)', pass: false,
+            value: ga4IdList.length > 0
+                ? 'GA4 script found (' + ga4IdList[0] + ') but not sending data'
+                : 'GA4 script found but not sending data',
+            recommendation: 'GA4 is installed but not sending data. Verify the measurement ID and gtag configuration.',
+            severity: 'major',
+        });
+    } else {
+        results.seo.push({
+            test: 'ga4_check', label: 'Google Analytics 4 (GA4)', pass: true,
+            value: 'GA4 active' + (ga4IdList.length > 0 ? ' (' + ga4IdList[0] + ')' : '') + ', sending data',
+            recommendation: null, severity: null,
+        });
+    }
+
+    // Sub-warning: duplicate tracking
+    if (hasDuplicateGa4) {
+        results.seo.push({
+            test: 'ga4_duplicates', label: 'GA4 Duplicate Tracking', pass: false,
+            value: 'Duplicate tracking: ' + ga4IdList.join(', '),
+            recommendation: 'Multiple GA4 measurement IDs detected. This causes double-counted pageviews and inflated metrics.',
+            severity: 'minor',
+        });
+    }
+
     // ===================== PERFORMANCE CHECKS =====================
 
     const perf = window.performance;
