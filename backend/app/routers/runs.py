@@ -31,12 +31,13 @@ def _dispatch_qa_task(
     run_id: int,
     partial_pages: Optional[list[str]] = None,
     test_mode: str = "design",
+    test_types: Optional[list[str]] = None,
 ) -> None:
     """Dispatch the Celery QA task. Silently swallows errors (e.g. no broker)."""
     try:
         from app.workers.qa_tasks import run_qa_job
 
-        run_qa_job.delay(run_id, partial_pages, test_mode)
+        run_qa_job.delay(run_id, partial_pages, test_mode, test_types)
     except Exception:
         pass
 
@@ -73,6 +74,7 @@ def start_run(
     partial: bool = Query(default=False),
     pages: Optional[str] = Query(default=None, description="Comma-separated page slugs"),
     test_mode: str = Query(default="design", description="'design' = compare vs Framer/Figma, 'ai' = AI-only analysis"),
+    test_types: Optional[list[str]] = Query(default=None, description="Which test phases to run: qa, functional, ada, seo, performance"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin", "developer")),
 ) -> RunResponse:
@@ -104,7 +106,7 @@ def start_run(
 
     # Dispatch Celery task to execute the QA run asynchronously
     partial_pages = [p.strip() for p in pages.split(",") if p.strip()] if pages else None
-    _dispatch_qa_task(run.id, partial_pages, test_mode)
+    _dispatch_qa_task(run.id, partial_pages, test_mode, test_types)
 
     return run  # type: ignore[return-value]
 
