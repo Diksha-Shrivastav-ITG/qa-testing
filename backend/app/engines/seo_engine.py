@@ -188,6 +188,69 @@ async () => {
         severity: window.location.protocol !== 'https:' ? 'critical' : null,
     });
 
+    // 13. Google Tag Manager (GTM)
+    const gtmObj = window.google_tag_manager;
+    const dataLayer = window.dataLayer;
+    const hasGtm = !!gtmObj && Array.isArray(dataLayer);
+    const gtmStarted = hasGtm && dataLayer.some(e => e && e.event === 'gtm.start');
+
+    // Extract all GTM container IDs from scripts
+    const allScripts = Array.from(document.querySelectorAll('script'));
+    const gtmIds = new Set();
+    allScripts.forEach(s => {
+        const matches = (s.src + (s.textContent || '')).match(/GTM-[A-Z0-9]+/g);
+        if (matches) matches.forEach(id => gtmIds.add(id));
+    });
+    const gtmIdList = Array.from(gtmIds);
+    const hasDuplicateGtm = gtmIdList.length > 1;
+
+    // Check for noscript fallback iframe
+    const noscripts = Array.from(document.querySelectorAll('noscript'));
+    const hasGtmNoscript = noscripts.some(ns => ns.innerHTML.includes('googletagmanager.com'));
+
+    // Main GTM check — passes if GTM is detected and firing
+    if (!hasGtm) {
+        results.seo.push({
+            test: 'gtm_check', label: 'Google Tag Manager (GTM)', pass: false,
+            value: '(not installed)',
+            recommendation: 'Install Google Tag Manager to manage marketing tags and tracking scripts',
+            severity: 'critical',
+        });
+    } else if (!gtmStarted) {
+        results.seo.push({
+            test: 'gtm_check', label: 'Google Tag Manager (GTM)', pass: false,
+            value: gtmIdList.length > 0 ? gtmIdList[0] + ' found but not firing' : 'GTM found but not firing',
+            recommendation: 'GTM container is present but not loading. Check the container snippet placement and ID.',
+            severity: 'major',
+        });
+    } else {
+        results.seo.push({
+            test: 'gtm_check', label: 'Google Tag Manager (GTM)', pass: true,
+            value: gtmIdList[0] + ' active' + (hasGtmNoscript ? ', noscript present' : ''),
+            recommendation: null, severity: null,
+        });
+    }
+
+    // Sub-warning: missing noscript fallback
+    if (hasGtm && gtmStarted && !hasGtmNoscript) {
+        results.seo.push({
+            test: 'gtm_noscript', label: 'GTM Noscript Fallback', pass: false,
+            value: 'Missing <noscript> iframe for GTM',
+            recommendation: 'Add the GTM noscript fallback iframe after the opening <body> tag for non-JS environments',
+            severity: 'minor',
+        });
+    }
+
+    // Sub-warning: duplicate containers
+    if (hasDuplicateGtm) {
+        results.seo.push({
+            test: 'gtm_duplicates', label: 'GTM Duplicate Containers', pass: false,
+            value: 'Multiple containers: ' + gtmIdList.join(', '),
+            recommendation: 'Multiple GTM containers detected. Use a single container to avoid conflicts and double-tracking.',
+            severity: 'minor',
+        });
+    }
+
     // ===================== PERFORMANCE CHECKS =====================
 
     const perf = window.performance;
