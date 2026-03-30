@@ -221,10 +221,7 @@ async def _run_qa_job_async(
             db.commit()
             return
 
-        # Store test_mode and test_types on the run
-        run.test_mode = test_mode
-        run.test_types = ",".join(test_types) if test_types else None
-        db.commit()
+        # test_mode and test_types are already stored at run creation time in runs.py
 
         run_dir = f"run_{run_id}"
         done_phases: list[str] = []
