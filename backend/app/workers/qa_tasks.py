@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from app.workers.celery_app import celery_app
 
@@ -43,6 +46,13 @@ PHASE_WEIGHTS = {
     "matching": 0.03,
     "scoring": 0.07,
 }
+
+
+def _should_run(phase: str, test_types: "Optional[list[str]]") -> bool:
+    """Return True if this phase should run. None means run everything."""
+    if test_types is None:
+        return True
+    return phase in test_types
 
 
 def _overall_progress(completed_phases: list[str], current_phase: str, phase_progress: float) -> float:
@@ -162,6 +172,7 @@ async def _run_qa_job_async(
     run_id: int,
     partial_pages: Optional[list[str]] = None,
     test_mode: str = "design",
+    test_types: Optional[list[str]] = None,
     *,
     _publish_fn=publish_progress,
 ) -> None:
@@ -405,143 +416,152 @@ async def _run_qa_job_async(
 
         # ---- Phase 3: Compare ----
         done_phases.append("capture")
-        comparison_engine = ComparisonEngine(
-            groq_api_key=settings.groq_api_key,
-            storage_path=settings.storage_path,
-        )
-        total_comparisons = len(capture_pairs)
+        if _should_run("qa", test_types):
+            comparison_engine = ComparisonEngine(
+                groq_api_key=settings.groq_api_key,
+                storage_path=settings.storage_path,
+            )
+            total_comparisons = len(capture_pairs)
 
-        _severity_map = {
-            "critical": IssueSeverity.critical,
-            "high": IssueSeverity.major,
-            "medium": IssueSeverity.minor,
-            "low": IssueSeverity.minor,
-            "major": IssueSeverity.major,
-            "minor": IssueSeverity.minor,
-        }
+            _severity_map = {
+                "critical": IssueSeverity.critical,
+                "high": IssueSeverity.major,
+                "medium": IssueSeverity.minor,
+                "low": IssueSeverity.minor,
+                "major": IssueSeverity.major,
+                "minor": IssueSeverity.minor,
+            }
 
-        # Run all breakpoint comparisons concurrently — semaphore caps parallel AI calls
-        _compare_sem = asyncio.Semaphore(6)
+            # Run all breakpoint comparisons concurrently — semaphore caps parallel AI calls
+            _compare_sem = asyncio.Semaphore(6)
 
-        async def _run_single_comparison(pair: dict):
-            async with _compare_sem:
-                _out = os.path.join(
-                    settings.storage_path, run_dir, "comparisons",
-                    pair["page"], str(pair["breakpoint"])
-                )
-                try:
-                    if pair["mode"] == "ai":
-                        result = await comparison_engine.compare_ai_only(
-                            shopify_path=pair["shopify_path"],
-                            output_dir=_out,
-                            page=pair["page"],
-                            breakpoint=pair["breakpoint"],
-                        )
-                    else:
-                        result = await comparison_engine.compare(
-                            design_path=pair["design_path"],
-                            shopify_path=pair["shopify_path"],
-                            output_dir=_out,
-                            page=pair["page"],
-                            breakpoint=pair["breakpoint"],
-                        )
-                    return pair, result
-                except Exception:
-                    return pair, None
+            async def _run_single_comparison(pair: dict):
+                async with _compare_sem:
+                    _out = os.path.join(
+                        settings.storage_path, run_dir, "comparisons",
+                        pair["page"], str(pair["breakpoint"])
+                    )
+                    try:
+                        if pair["mode"] == "ai":
+                            result = await comparison_engine.compare_ai_only(
+                                shopify_path=pair["shopify_path"],
+                                output_dir=_out,
+                                page=pair["page"],
+                                breakpoint=pair["breakpoint"],
+                            )
+                        else:
+                            result = await comparison_engine.compare(
+                                design_path=pair["design_path"],
+                                shopify_path=pair["shopify_path"],
+                                output_dir=_out,
+                                page=pair["page"],
+                                breakpoint=pair["breakpoint"],
+                            )
+                        return pair, result
+                    except Exception:
+                        return pair, None
 
-        _publish_fn(run_id, "compare", progress=_overall_progress(done_phases, "compare", 0), message="Running AI comparisons in parallel")
-        raw_compare_results = await asyncio.gather(*[_run_single_comparison(p) for p in capture_pairs])
+            _publish_fn(run_id, "compare", progress=_overall_progress(done_phases, "compare", 0), message="Running AI comparisons in parallel")
+            raw_compare_results = await asyncio.gather(*[_run_single_comparison(p) for p in capture_pairs])
 
-        for idx, (pair, comp_result) in enumerate(raw_compare_results):
-            if comp_result is None:
-                continue
+            for idx, (pair, comp_result) in enumerate(raw_compare_results):
+                if comp_result is None:
+                    continue
 
-            if pair["mode"] == "ai":
-                msg = f"AI analysis of {pair['page']} @{pair['breakpoint']}px"
-            else:
-                msg = f"Compared {pair['page']} @{pair['breakpoint']}px SSIM={comp_result.ssim_score:.3f}"
+                if pair["mode"] == "ai":
+                    msg = f"AI analysis of {pair['page']} @{pair['breakpoint']}px"
+                else:
+                    msg = f"Compared {pair['page']} @{pair['breakpoint']}px SSIM={comp_result.ssim_score:.3f}"
 
-            ai_status = AiAnalysisStatus.failed if comp_result.ai_status == "failed" else AiAnalysisStatus.completed
-            db.add(Comparison(
-                qa_run_id=run_id,
-                page=pair["page"],
-                breakpoint=pair["breakpoint"],
-                ssim_score=comp_result.ssim_score,
-                diff_image_path=comp_result.diff_image_path,
-                heatmap_path=comp_result.heatmap_path,
-                ai_analysis_status=ai_status,
-            ))
-
-            for ai_issue in comp_result.ai_issues:
-                severity_str = ai_issue.get("severity", "minor").lower()
-                severity = _severity_map.get(severity_str, IssueSeverity.minor)
-                element_desc = ai_issue.get("element", "")
-                db.add(Issue(
+                ai_status = AiAnalysisStatus.failed if comp_result.ai_status == "failed" else AiAnalysisStatus.completed
+                db.add(Comparison(
                     qa_run_id=run_id,
                     page=pair["page"],
                     breakpoint=pair["breakpoint"],
-                    type=IssueType.visual,
-                    severity=severity,
-                    description=ai_issue.get("description", "Visual issue detected"),
-                    ai_suggestion=ai_issue.get("suggestion"),
-                    element_selector=element_desc,
-                    location_x=None,
-                    location_y=None,
-                    screenshot_path=pair["shopify_path"],
-                    status=IssueStatus.open,
+                    ssim_score=comp_result.ssim_score,
+                    diff_image_path=comp_result.diff_image_path,
+                    heatmap_path=comp_result.heatmap_path,
+                    ai_analysis_status=ai_status,
                 ))
 
-            db.commit()
-            _publish_fn(run_id, "compare", page=pair["page"],
-                        breakpoint_val=pair["breakpoint"],
-                        progress=_overall_progress(done_phases, "compare", (idx + 1) / max(total_comparisons, 1)),
-                        message=msg)
-
-        # ---- Phase 4: Functional Tests ----
-        done_phases.append("compare")
-        _publish_fn(run_id, "functional", progress=_overall_progress(done_phases, "functional", 0), message="Running functional tests")
-
-        functional_engine = FunctionalEngine(storage_path=settings.storage_path)
-        func_output_dir = os.path.join(settings.storage_path, run_dir, "functional")
-        os.makedirs(func_output_dir, exist_ok=True)
-
-        first_shopify_path = list(page_mappings.keys())[0]
-        func_url = _build_page_url(project.shopify_url, first_shopify_path)
-        first_page_name = first_shopify_path.strip("/") or "home"
-
-        try:
-            pw_page = await functional_engine._create_page(func_url)
-            surface_results = await functional_engine.run_surface_tests(pw_page, func_output_dir)
-            flow_results = await functional_engine.run_shopify_flows(pw_page, func_output_dir)
-
-            for fr in surface_results + flow_results:
-                status = FunctionalTestStatus.pass_ if fr.status == "pass" else FunctionalTestStatus.fail
-                db.add(FunctionalTest(
-                    qa_run_id=run_id,
-                    test_name=fr.test_name,
-                    status=status,
-                    severity=fr.severity,
-                    step_failed=str(fr.step_failed) if fr.step_failed is not None else None,
-                    error_message=fr.error_message,
-                    screenshot_path=fr.screenshot_path,
-                ))
-                if fr.status == "fail":
+                for ai_issue in comp_result.ai_issues:
+                    severity_str = ai_issue.get("severity", "minor").lower()
+                    severity = _severity_map.get(severity_str, IssueSeverity.minor)
+                    element_desc = ai_issue.get("element", "")
                     db.add(Issue(
                         qa_run_id=run_id,
-                        page=first_page_name,
-                        breakpoint=None,
-                        type=IssueType.functional,
-                        severity=IssueSeverity.major if fr.severity == "major" else IssueSeverity.minor,
-                        description=fr.error_message or f"Functional test '{fr.test_name}' failed",
+                        page=pair["page"],
+                        breakpoint=pair["breakpoint"],
+                        type=IssueType.visual,
+                        severity=severity,
+                        description=ai_issue.get("description", "Visual issue detected"),
+                        ai_suggestion=ai_issue.get("suggestion"),
+                        element_selector=element_desc,
+                        location_x=None,
+                        location_y=None,
+                        screenshot_path=pair["shopify_path"],
                         status=IssueStatus.open,
                     ))
 
-            db.commit()
-        except Exception:
-            pass
+                db.commit()
+                _publish_fn(run_id, "compare", page=pair["page"],
+                            breakpoint_val=pair["breakpoint"],
+                            progress=_overall_progress(done_phases, "compare", (idx + 1) / max(total_comparisons, 1)),
+                            message=msg)
+            done_phases.append("compare")
+            _publish_fn(run_id, "compare", progress=_overall_progress(done_phases, "", 0), message="Comparison complete")
+        else:
+            done_phases.append("compare")
+            _publish_fn(run_id, "compare", progress=_overall_progress(done_phases, "", 0), message="QA test skipped")
 
-        done_phases.append("functional")
-        _publish_fn(run_id, "functional", progress=_overall_progress(done_phases, "", 0), message="Functional tests complete")
+        # ---- Phase 4: Functional Tests ----
+        if _should_run("functional", test_types):
+            _publish_fn(run_id, "functional", progress=_overall_progress(done_phases, "functional", 0), message="Running functional tests")
+
+            functional_engine = FunctionalEngine(storage_path=settings.storage_path)
+            func_output_dir = os.path.join(settings.storage_path, run_dir, "functional")
+            os.makedirs(func_output_dir, exist_ok=True)
+
+            first_shopify_path = list(page_mappings.keys())[0]
+            func_url = _build_page_url(project.shopify_url, first_shopify_path)
+            first_page_name = first_shopify_path.strip("/") or "home"
+
+            try:
+                pw_page = await functional_engine._create_page(func_url)
+                surface_results = await functional_engine.run_surface_tests(pw_page, func_output_dir)
+                flow_results = await functional_engine.run_shopify_flows(pw_page, func_output_dir)
+
+                for fr in surface_results + flow_results:
+                    status = FunctionalTestStatus.pass_ if fr.status == "pass" else FunctionalTestStatus.fail
+                    db.add(FunctionalTest(
+                        qa_run_id=run_id,
+                        test_name=fr.test_name,
+                        status=status,
+                        severity=fr.severity,
+                        step_failed=str(fr.step_failed) if fr.step_failed is not None else None,
+                        error_message=fr.error_message,
+                        screenshot_path=fr.screenshot_path,
+                    ))
+                    if fr.status == "fail":
+                        db.add(Issue(
+                            qa_run_id=run_id,
+                            page=first_page_name,
+                            breakpoint=None,
+                            type=IssueType.functional,
+                            severity=IssueSeverity.major if fr.severity == "major" else IssueSeverity.minor,
+                            description=fr.error_message or f"Functional test '{fr.test_name}' failed",
+                            status=IssueStatus.open,
+                        ))
+
+                db.commit()
+            except Exception:
+                pass
+
+            done_phases.append("functional")
+            _publish_fn(run_id, "functional", progress=_overall_progress(done_phases, "", 0), message="Functional tests complete")
+        else:
+            done_phases.append("functional")
+            _publish_fn(run_id, "functional", progress=_overall_progress(done_phases, "", 0), message="Functional test skipped")
 
         # ---- Phases 5+6+6b: Accessibility, Link Audit, SEO — all run concurrently per page ----
         from app.engines.seo_engine import SeoPerformanceEngine
@@ -552,6 +572,12 @@ async def _run_qa_job_async(
         seo_engine = SeoPerformanceEngine()
 
         _publish_fn(run_id, "accessibility", progress=_overall_progress(done_phases, "accessibility", 0), message="Running ADA, link audit & SEO in parallel")
+
+        async def _empty_list():
+            return []
+
+        async def _empty_none():
+            return None
 
         combined_pages_tested: set[str] = set()
         for shopify_path in list(page_mappings.keys())[:3]:
@@ -569,14 +595,19 @@ async def _run_qa_job_async(
                         progress=_overall_progress(done_phases, "accessibility", 0.3),
                         message=f"Checking {page_name}: ADA + links + SEO simultaneously")
 
+            run_ada = _should_run("ada", test_types)
+            run_seo_or_perf = _should_run("seo", test_types) or _should_run("performance", test_types)
+
             acc_results, link_items, seo_result = await asyncio.gather(
-                accessibility_engine.run_checks(page_url=page_url, password=project.shopify_password),
+                accessibility_engine.run_checks(page_url=page_url, password=project.shopify_password)
+                if run_ada else _empty_list(),
                 link_engine.audit_page(page_url=page_url, password=project.shopify_password),
-                seo_engine.analyze_page(page_url=page_url, password=project.shopify_password),
+                seo_engine.analyze_page(page_url=page_url, password=project.shopify_password)
+                if run_seo_or_perf else _empty_none(),
                 return_exceptions=True,
             )
 
-            if not isinstance(acc_results, Exception):
+            if run_ada and not isinstance(acc_results, Exception):
                 try:
                     for ar in acc_results:
                         db.add(AccessibilityResult(
@@ -603,30 +634,35 @@ async def _run_qa_job_async(
                 except Exception:
                     pass
 
-            if not isinstance(seo_result, Exception):
-                try:
-                    for check in seo_result.seo_checks:
-                        db.add(SeoResultModel(
-                            qa_run_id=run_id, page=page_name,
-                            test=check.test, label=check.label,
-                            passed=check.passed, value=check.value,
-                            recommendation=check.recommendation, severity=check.severity,
-                        ))
-                    perf = seo_result.performance
-                    db.add(PerformanceResult(
-                        qa_run_id=run_id, page=page_name,
-                        load_time_ms=perf.load_time_ms, dom_ready_ms=perf.dom_ready_ms,
-                        ttfb_ms=perf.ttfb_ms, total_resources=perf.total_resources,
-                        total_size_bytes=perf.total_size_bytes,
-                        js_count=perf.js_count, js_size_bytes=perf.js_size_bytes,
-                        css_count=perf.css_count, css_size_bytes=perf.css_size_bytes,
-                        img_count=perf.img_count, img_size_bytes=perf.img_size_bytes,
-                        dom_nodes=perf.dom_nodes,
-                        issues_json=json.dumps(perf.issues) if perf.issues else None,
-                    ))
-                    db.commit()
-                except Exception:
-                    pass
+            if run_seo_or_perf:
+                if isinstance(seo_result, Exception):
+                    logger.warning("SEO engine failed for %s: %s", page_name, seo_result)
+                else:
+                    try:
+                        if _should_run("seo", test_types):
+                            for check in seo_result.seo_checks:
+                                db.add(SeoResultModel(
+                                    qa_run_id=run_id, page=page_name,
+                                    test=check.test, label=check.label,
+                                    passed=check.passed, value=check.value,
+                                    recommendation=check.recommendation, severity=check.severity,
+                                ))
+                        if _should_run("performance", test_types):
+                            perf = seo_result.performance
+                            db.add(PerformanceResult(
+                                qa_run_id=run_id, page=page_name,
+                                load_time_ms=perf.load_time_ms, dom_ready_ms=perf.dom_ready_ms,
+                                ttfb_ms=perf.ttfb_ms, total_resources=perf.total_resources,
+                                total_size_bytes=perf.total_size_bytes,
+                                js_count=perf.js_count, js_size_bytes=perf.js_size_bytes,
+                                css_count=perf.css_count, css_size_bytes=perf.css_size_bytes,
+                                img_count=perf.img_count, img_size_bytes=perf.img_size_bytes,
+                                dom_nodes=perf.dom_nodes,
+                                issues_json=json.dumps(perf.issues) if perf.issues else None,
+                            ))
+                        db.commit()
+                    except Exception as e:
+                        logger.error("Failed to save SEO/performance results for %s: %s", page_name, e)
 
         done_phases.append("accessibility")
         done_phases.append("link_audit")
@@ -705,10 +741,13 @@ def run_qa_job(
     run_id: int,
     partial_pages: Optional[list[str]] = None,
     test_mode: str = "design",
+    test_types: Optional[list[str]] = None,
 ) -> dict:
     loop = asyncio.new_event_loop()
     try:
-        loop.run_until_complete(_run_qa_job_async(run_id, partial_pages, test_mode))
+        loop.run_until_complete(
+            _run_qa_job_async(run_id, partial_pages, test_mode, test_types=test_types)
+        )
     finally:
         loop.close()
     return {"run_id": run_id, "status": "dispatched"}
