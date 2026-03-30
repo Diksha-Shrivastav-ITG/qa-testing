@@ -316,6 +316,54 @@ async () => {
         });
     }
 
+    // ===================== ASYNC RESOURCE CHECKS =====================
+
+    let sitemapOk = false;
+    try {
+        const sitemapResp = await fetch('/sitemap.xml', { method: 'HEAD' });
+        sitemapOk = sitemapResp.ok;
+    } catch(e) {}
+
+    let bingSiteAuthOk = false;
+    try {
+        const bingAuthResp = await fetch('/BingSiteAuth.xml', { method: 'HEAD' });
+        bingSiteAuthOk = bingAuthResp.ok;
+    } catch(e) {}
+
+    // 15. Google Search Console (GSC)
+    const gscMeta = document.querySelector('meta[name="google-site-verification"]');
+    const gscContent = gscMeta ? (gscMeta.getAttribute('content') || '').trim() : '';
+    const hasGscVerification = gscContent.length > 0;
+
+    if (!hasGscVerification && !sitemapOk) {
+        results.seo.push({
+            test: 'gsc_check', label: 'Google Search Console Verification', pass: false,
+            value: '(verification tag missing)',
+            recommendation: 'Add <meta name="google-site-verification"> tag and ensure /sitemap.xml is accessible for Google Search Console',
+            severity: 'major',
+        });
+    } else if (!hasGscVerification) {
+        results.seo.push({
+            test: 'gsc_check', label: 'Google Search Console Verification', pass: false,
+            value: '(verification tag missing, sitemap.xml accessible)',
+            recommendation: 'Add <meta name="google-site-verification"> tag to verify site ownership in Google Search Console',
+            severity: 'major',
+        });
+    } else if (!sitemapOk) {
+        results.seo.push({
+            test: 'gsc_check', label: 'Google Search Console Verification', pass: false,
+            value: 'Verified, but /sitemap.xml not found',
+            recommendation: 'Sitemap.xml is missing or inaccessible. Submit a sitemap in Google Search Console for better indexing.',
+            severity: 'minor',
+        });
+    } else {
+        results.seo.push({
+            test: 'gsc_check', label: 'Google Search Console Verification', pass: true,
+            value: 'Verified, sitemap.xml accessible',
+            recommendation: null, severity: null,
+        });
+    }
+
     // ===================== PERFORMANCE CHECKS =====================
 
     const perf = window.performance;
