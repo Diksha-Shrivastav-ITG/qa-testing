@@ -3,11 +3,15 @@ import api from "./client";
 export const startRun = (
   projectId: number,
   pages?: string,
-  testMode: "design" | "ai" = "design"
+  testMode: "design" | "ai" = "design",
+  testTypes?: string[]
 ) => {
   const params = new URLSearchParams();
   if (pages) params.set("pages", pages);
   if (testMode !== "design") params.set("test_mode", testMode);
+  if (testTypes && testTypes.length > 0) {
+    testTypes.forEach((t) => params.append("test_types", t));
+  }
   const qs = params.toString() ? `?${params.toString()}` : "";
   return api.post(`/api/projects/${projectId}/runs${qs}`);
 };
