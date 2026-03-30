@@ -364,6 +364,53 @@ async () => {
         });
     }
 
+    // 16. Bing Webmaster Tools
+    const bingMeta = document.querySelector('meta[name="msvalidate.01"]');
+    const bingContent = bingMeta ? (bingMeta.getAttribute('content') || '').trim() : '';
+    const hasBingVerification = bingContent.length > 0;
+
+    // Check for bingbot-blocking directives (reuse robotsMeta from check 10)
+    const bingRobotsContent = robotsMeta ? (robotsMeta.getAttribute('content') || '').toLowerCase() : '';
+    const bingbotMeta = document.querySelector('meta[name="bingbot"]');
+    const bingbotContent = bingbotMeta ? (bingbotMeta.getAttribute('content') || '').toLowerCase() : '';
+    const bingbotBlocked = bingbotContent.includes('noindex') ||
+        (bingRobotsContent.includes('noindex') && !bingbotContent);
+
+    // Main Bing check
+    if (bingbotBlocked) {
+        results.seo.push({
+            test: 'bing_webmaster_check', label: 'Bing Webmaster Tools', pass: false,
+            value: bingbotContent.includes('noindex')
+                ? 'Bingbot blocked by <meta name="bingbot"> noindex'
+                : 'Bingbot blocked by <meta name="robots"> noindex',
+            recommendation: 'Bing is blocked from indexing this page. Remove the noindex directive if this is unintended.',
+            severity: 'critical',
+        });
+    } else if (!hasBingVerification) {
+        results.seo.push({
+            test: 'bing_webmaster_check', label: 'Bing Webmaster Tools', pass: false,
+            value: '(verification tag missing)',
+            recommendation: 'Add <meta name="msvalidate.01"> tag to verify site ownership in Bing Webmaster Tools',
+            severity: 'major',
+        });
+    } else {
+        results.seo.push({
+            test: 'bing_webmaster_check', label: 'Bing Webmaster Tools', pass: true,
+            value: 'Verified, no blocking directives',
+            recommendation: null, severity: null,
+        });
+    }
+
+    // Sub-warning: BingSiteAuth.xml missing
+    if (hasBingVerification && !bingSiteAuthOk) {
+        results.seo.push({
+            test: 'bing_siteauth', label: 'Bing Site Auth File', pass: false,
+            value: 'Verified, but /BingSiteAuth.xml not found',
+            recommendation: 'Add a BingSiteAuth.xml file to the site root as an alternative verification method for Bing',
+            severity: 'minor',
+        });
+    }
+
     // ===================== PERFORMANCE CHECKS =====================
 
     const perf = window.performance;
