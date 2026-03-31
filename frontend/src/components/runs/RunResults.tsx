@@ -1000,6 +1000,16 @@ const RunResults = ({ runId }: RunResultsProps) => {
   const seoSectionNum = showSeo ? ++sectionCounter : 0;
   const perfSectionNum = showPerf ? ++sectionCounter : 0;
 
+  // Label map for display
+  const TEST_LABELS: Record<string, string> = {
+    qa: "QA Test",
+    functional: "Functionality",
+    ada: "ADA",
+    seo: "SEO",
+    performance: "Performance",
+    link_audit: "Link Audit",
+  };
+
   return (
     <div className="space-y-6">
       {/* Score Card */}
@@ -1010,6 +1020,21 @@ const RunResults = ({ runId }: RunResultsProps) => {
         accCount={accItems.length}
         testMode={run.test_mode}
       />
+
+      {/* Custom Run badge — only shown when test_types is set */}
+      {run.test_types && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-2.5 flex items-center gap-3 text-sm">
+          <span className="font-semibold text-indigo-700">⚙️ Custom Run</span>
+          <span className="text-indigo-500">·</span>
+          <span className="text-indigo-600">
+            Tests selected:{" "}
+            {run.test_types
+              .split(",")
+              .map((t) => TEST_LABELS[t] ?? t)
+              .join(", ")}
+          </span>
+        </div>
+      )}
 
       {/* Summary bar */}
       <div className="bg-white border border-gray-200 rounded-lg px-5 py-3 flex items-center justify-between text-sm">
