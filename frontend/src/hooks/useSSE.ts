@@ -34,7 +34,7 @@ export const useSSE = (runId: number | null): UseSSEResult => {
       if (cancelled) return;
 
       const token = localStorage.getItem("token");
-      const url = `http://localhost:8000/api/runs/${runId}/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+      const url = `/api/runs/${runId}/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 
       const es = new EventSource(url);
       esRef.current = es;
