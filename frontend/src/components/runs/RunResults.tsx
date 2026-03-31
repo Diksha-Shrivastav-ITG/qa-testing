@@ -71,7 +71,7 @@ interface RunData {
 
 // ---------- Helpers ----------
 
-const BACKEND = "http://localhost:8000";
+const BACKEND = "";
 
 const SEVERITY_STYLES: Record<string, string> = {
   critical: "bg-red-100 text-red-700",

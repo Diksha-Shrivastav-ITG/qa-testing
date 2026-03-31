@@ -44,7 +44,7 @@ const RunDetailPage = () => {
   const handleDownload = (format: "pdf" | "html") => {
     const token = localStorage.getItem("token");
     const endpoint = format === "pdf" ? "pdf" : "html";
-    const url = `http://localhost:8000/api/runs/${runId}/report/${endpoint}${
+    const url = `/api/runs/${runId}/report/${endpoint}${
       token ? `?token=${encodeURIComponent(token)}` : ""
     }`;
     window.open(url, "_blank");
