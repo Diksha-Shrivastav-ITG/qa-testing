@@ -191,8 +191,14 @@ async () => {
     // 13. Google Tag Manager (GTM)
     const gtmObj = window.google_tag_manager;
     const dataLayer = window.dataLayer;
-    const hasGtm = !!gtmObj && Array.isArray(dataLayer);
-    const gtmStarted = hasGtm && dataLayer.some(e => e && e.event === 'gtm.start');
+    const hasGtmRuntime = !!gtmObj && Array.isArray(dataLayer);
+    // Also check for GTM script tag in DOM (covers cases where GTM hasn't fired yet)
+    const allScriptsForGtm = Array.from(document.querySelectorAll('script'));
+    const hasGtmScriptTag = allScriptsForGtm.some(s =>
+        s.src && s.src.includes('googletagmanager.com/gtm.js')
+    );
+    const hasGtm = hasGtmRuntime || hasGtmScriptTag;
+    const gtmStarted = hasGtmRuntime && Array.isArray(dataLayer) && dataLayer.some(e => e && e.event === 'gtm.start');
 
     // Extract all GTM container IDs from scripts
     const allScripts = Array.from(document.querySelectorAll('script'));
@@ -208,7 +214,7 @@ async () => {
     const noscripts = Array.from(document.querySelectorAll('noscript'));
     const hasGtmNoscript = noscripts.some(ns => ns.innerHTML.includes('googletagmanager.com'));
 
-    // Main GTM check — passes if GTM is detected and firing
+    // Main GTM check — passes if GTM script tag is present (runtime object is timing-dependent)
     if (!hasGtm) {
         results.seo.push({
             test: 'gtm_check', label: 'Google Tag Manager (GTM)', pass: false,
@@ -216,17 +222,10 @@ async () => {
             recommendation: 'Install Google Tag Manager to manage marketing tags and tracking scripts',
             severity: 'critical',
         });
-    } else if (!gtmStarted) {
-        results.seo.push({
-            test: 'gtm_check', label: 'Google Tag Manager (GTM)', pass: false,
-            value: gtmIdList.length > 0 ? gtmIdList[0] + ' found but not firing' : 'GTM found but not firing',
-            recommendation: 'GTM container is present but not loading. Check the container snippet placement and ID.',
-            severity: 'major',
-        });
     } else {
         results.seo.push({
             test: 'gtm_check', label: 'Google Tag Manager (GTM)', pass: true,
-            value: gtmIdList[0] + ' active' + (hasGtmNoscript ? ', noscript present' : ''),
+            value: gtmIdList.length > 0 ? gtmIdList[0] + ' installed' + (gtmStarted ? ', active' : '') + (hasGtmNoscript ? ', noscript present' : '') : 'GTM installed',
             recommendation: null, severity: null,
         });
     }
@@ -375,12 +374,10 @@ async () => {
     const bingContent = bingMeta ? (bingMeta.getAttribute('content') || '').trim() : '';
     const hasBingVerification = bingContent.length > 0;
 
-    // Check for bingbot-blocking directives (reuse robotsMeta from check 10)
-    const bingRobotsContent = robotsMeta ? (robotsMeta.getAttribute('content') || '').toLowerCase() : '';
+    // Check for bingbot-blocking directives — only flag if bingbot-specific meta blocks it
     const bingbotMeta = document.querySelector('meta[name="bingbot"]');
     const bingbotContent = bingbotMeta ? (bingbotMeta.getAttribute('content') || '').toLowerCase() : '';
-    const bingbotBlocked = bingbotContent.includes('noindex') ||
-        (bingRobotsContent.includes('noindex') && !bingbotContent);
+    const bingbotBlocked = bingbotContent.includes('noindex');
 
     // Main Bing check
     if (bingbotBlocked) {
@@ -402,7 +399,7 @@ async () => {
     } else {
         results.seo.push({
             test: 'bing_webmaster_check', label: 'Bing Webmaster Tools', pass: true,
-            value: 'Verified, no blocking directives',
+            value: hasBingVerification ? 'Verified (msvalidate.01 present)' : 'No blocking directives',
             recommendation: null, severity: null,
         });
     }
@@ -578,8 +575,8 @@ class SeoPerformanceEngine:
                     "path": "/",
                 }])
 
-            await page.goto(page_url, wait_until="domcontentloaded", timeout=60000)
-            await asyncio.sleep(2)
+            await page.goto(page_url, wait_until="load", timeout=60000)
+            await asyncio.sleep(4)
 
             try:
                 raw = await page.evaluate(_SEO_PERF_JS)
