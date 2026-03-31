@@ -66,6 +66,7 @@ interface RunData {
   run_number?: number;
   started_at: string;
   test_mode?: string;
+  test_types?: string | null; // comma-separated, null = Full QA (all tests)
 }
 
 // ---------- Helpers ----------
@@ -984,11 +985,30 @@ const RunResults = ({ runId }: RunResultsProps) => {
     (p) => issuesByPage[p]?.length > 0
   );
 
-  // Section numbering: pages first, then accessibility, then link audit
-  const accSectionNum = pagesWithIssues.length + 1;
-  const linkSectionNum = pagesWithIssues.length + 2;
-  const seoSectionNum = pagesWithIssues.length + 3;
-  const perfSectionNum = pagesWithIssues.length + 4;
+  // Determine which sections were actually run
+  // test_types is null → Full QA → show everything
+  const runTypes = run.test_types ? new Set(run.test_types.split(",")) : null;
+  const showAda = runTypes === null || runTypes.has("ada");
+  const showLinkAudit = runTypes === null || runTypes.has("link_audit");
+  const showSeo = runTypes === null || runTypes.has("seo");
+  const showPerf = runTypes === null || runTypes.has("performance");
+
+  // Section numbering: pages first, then only sections that were run
+  let sectionCounter = pagesWithIssues.length;
+  const accSectionNum = showAda ? ++sectionCounter : 0;
+  const linkSectionNum = showLinkAudit ? ++sectionCounter : 0;
+  const seoSectionNum = showSeo ? ++sectionCounter : 0;
+  const perfSectionNum = showPerf ? ++sectionCounter : 0;
+
+  // Label map for display
+  const TEST_LABELS: Record<string, string> = {
+    qa: "QA Test",
+    functional: "Functionality",
+    ada: "ADA",
+    seo: "SEO",
+    performance: "Performance",
+    link_audit: "Link Audit",
+  };
 
   return (
     <div className="space-y-6">
@@ -1000,6 +1020,21 @@ const RunResults = ({ runId }: RunResultsProps) => {
         accCount={accItems.length}
         testMode={run.test_mode}
       />
+
+      {/* Custom Run badge — only shown when test_types is set */}
+      {run.test_types && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-2.5 flex items-center gap-3 text-sm">
+          <span className="font-semibold text-indigo-700">⚙️ Custom Run</span>
+          <span className="text-indigo-500">·</span>
+          <span className="text-indigo-600">
+            Tests selected:{" "}
+            {run.test_types
+              .split(",")
+              .map((t) => TEST_LABELS[t] ?? t)
+              .join(", ")}
+          </span>
+        </div>
+      )}
 
       {/* Summary bar */}
       <div className="bg-white border border-gray-200 rounded-lg px-5 py-3 flex items-center justify-between text-sm">
@@ -1048,17 +1083,17 @@ const RunResults = ({ runId }: RunResultsProps) => {
         </div>
       ))}
 
-      {/* Accessibility Section */}
-      <AccessibilitySection items={accItems} sectionNum={accSectionNum} />
+      {/* Accessibility Section — hidden when ADA test was not selected */}
+      {showAda && <AccessibilitySection items={accItems} sectionNum={accSectionNum} />}
 
-      {/* Link Audit Section */}
-      <LinkAuditSection items={linkItems} sectionNum={linkSectionNum} />
+      {/* Link Audit Section — hidden when Link & Button Audit was not selected */}
+      {showLinkAudit && <LinkAuditSection items={linkItems} sectionNum={linkSectionNum} />}
 
-      {/* SEO Section */}
-      <SeoSection items={seoItems} sectionNum={seoSectionNum} />
+      {/* SEO Section — hidden when SEO test was not selected */}
+      {showSeo && <SeoSection items={seoItems} sectionNum={seoSectionNum} />}
 
-      {/* Performance Section */}
-      <PerfSection items={perfItems} sectionNum={perfSectionNum} />
+      {/* Performance Section — hidden when Performance test was not selected */}
+      {showPerf && <PerfSection items={perfItems} sectionNum={perfSectionNum} />}
 
       {/* No issues at all */}
       {issues.length === 0 && accItems.length === 0 && (

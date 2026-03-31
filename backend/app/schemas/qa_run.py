@@ -15,5 +15,6 @@ class RunResponse(BaseModel):
     started_at: datetime
     completed_at: Optional[datetime] = None
     test_mode: str = "design"
+    test_types: Optional[str] = None  # comma-separated, None = Full QA (all tests)
 
     model_config = {"from_attributes": True}

@@ -43,8 +43,8 @@ const ProjectsPage = () => {
   });
 
   const runMutation = useMutation({
-    mutationFn: ({ projectId, pages, testMode }: { projectId: number; pages?: string; testMode?: "design" | "ai" }) =>
-      startRun(projectId, pages || undefined, testMode || "design"),
+    mutationFn: ({ projectId, pages, testMode, testTypes }: { projectId: number; pages?: string; testMode?: "design" | "ai"; testTypes?: string[] }) =>
+      startRun(projectId, pages || undefined, testMode || "design", testTypes),
     onSuccess: (res) => {
       setRunModalProjectId(null);
       navigate(`/runs/${res.data.id}`);
@@ -121,8 +121,8 @@ const ProjectsPage = () => {
       {/* Run QA modal */}
       {runModalProjectId !== null && (
         <RunQAModal
-          onConfirm={(pages, testMode) =>
-            runMutation.mutate({ projectId: runModalProjectId, pages, testMode })
+          onConfirm={(pages, testMode, testTypes) =>
+            runMutation.mutate({ projectId: runModalProjectId, pages, testMode, testTypes })
           }
           onCancel={() => setRunModalProjectId(null)}
           isLoading={runMutation.isPending}

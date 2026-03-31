@@ -99,6 +99,8 @@ def start_run(
         project_id=project_id,
         status=RunStatus.running,
         run_number=run_number,
+        test_mode=test_mode,
+        test_types=",".join(test_types) if test_types else None,
     )
     db.add(run)
     db.commit()
