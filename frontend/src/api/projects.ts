@@ -12,6 +12,7 @@ export const createProject = (data: {
   source_url?: string;
   shopify_password?: string;
   figma_token?: string;
+  page_mappings?: Record<string, string>;
 }) => api.post("/api/projects", data);
 
 export const updateProject = (id: number, data: Record<string, unknown>) =>

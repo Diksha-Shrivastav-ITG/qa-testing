@@ -267,17 +267,19 @@ const ProjectDetailPage = () => {
                   Source Type
                 </div>
                 <div className="text-sm text-gray-900 capitalize">
-                  {project.source_type}
+                  {project.source_type === "website" ? "Website" : project.source_type}
                 </div>
               </div>
-              <div>
-                <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                  Source URL
+              {project.source_type !== "website" && (
+                <div>
+                  <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                    Source URL
+                  </div>
+                  <div className="text-sm text-gray-900 break-all">
+                    {project.source_url}
+                  </div>
                 </div>
-                <div className="text-sm text-gray-900 break-all">
-                  {project.source_url}
-                </div>
-              </div>
+              )}
               <button
                 onClick={() => {
                   setSettingsForm({

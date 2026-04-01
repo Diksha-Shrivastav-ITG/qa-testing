@@ -20,6 +20,20 @@ const sourceTypeBadge = (sourceType: string) => {
       </span>
     );
   }
+  if (sourceType === "website") {
+    return (
+      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+        Website
+      </span>
+    );
+  }
+  if (sourceType === "none") {
+    return (
+      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+        AI Only
+      </span>
+    );
+  }
   return (
     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
       Framer
