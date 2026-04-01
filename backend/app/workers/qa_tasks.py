@@ -232,9 +232,12 @@ async def _run_qa_job_async(
         page_mappings: dict[str, str] = project.config.get("page_mappings", {})
 
         has_design_source = (
-            project.source_url
-            and project.source_url.strip()
-            and project.source_type != SourceType.none
+            project.source_type == SourceType.website
+            or (
+                project.source_url
+                and project.source_url.strip()
+                and project.source_type != SourceType.none
+            )
         )
 
         if not page_mappings:
@@ -333,7 +336,10 @@ async def _run_qa_job_async(
                 design_results = []
             else:
                 # Capture Shopify + Design simultaneously
-                source_url = (project.source_url or "").rstrip("/") + source_path
+                if project.source_type == SourceType.website:
+                    source_url = source_path  # full URL stored in mapping
+                else:
+                    source_url = (project.source_url or "").rstrip("/") + source_path
                 shopify_results, design_results = await asyncio.gather(
                     capture_engine.capture_page(
                         url=shopify_url,
@@ -349,7 +355,7 @@ async def _run_qa_job_async(
                         run_dir=run_dir,
                         source="design",
                         breakpoints=BREAKPOINTS,
-                        password=project.framer_password,
+                        password=project.framer_password if project.source_type != SourceType.website else None,
                     ),
                 )
 
@@ -578,7 +584,7 @@ async def _run_qa_job_async(
             return None
 
         combined_pages_tested: set[str] = set()
-        for shopify_path in list(page_mappings.keys())[:3]:
+        for shopify_path in page_mappings:
             db.refresh(run)
             if run.status == RunStatus.cancelled:
                 return
