@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 class SourceType(str, enum.Enum):
     framer = "framer"
     figma = "figma"
+    website = "website"
     none = "none"
 
 
