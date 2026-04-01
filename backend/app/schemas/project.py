@@ -17,6 +17,7 @@ class ProjectCreate(BaseModel):
     framer_password: Optional[str] = None
     figma_token: Optional[str] = None
     pass_threshold: float = 90.0
+    page_mappings: Optional[dict[str, str]] = None
 
 
 class ProjectUpdate(BaseModel):
@@ -27,6 +28,7 @@ class ProjectUpdate(BaseModel):
     framer_password: Optional[str] = None
     figma_token: Optional[str] = None
     pass_threshold: Optional[float] = None
+    page_mappings: Optional[dict[str, str]] = None
 
 
 class ProjectResponse(BaseModel):

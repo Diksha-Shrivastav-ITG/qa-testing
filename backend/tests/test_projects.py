@@ -147,3 +147,32 @@ def test_delete_project(client: TestClient, developer_token: str):
     # Subsequent GET should 404
     get_resp = client.get(f"/api/projects/{project_id}", headers=auth_header(developer_token))
     assert get_resp.status_code == 404, get_resp.text
+
+
+def test_create_website_project_with_mappings(client: TestClient, developer_token: str):
+    """Create a website project with page_mappings stored in config."""
+    payload = {
+        "name": "Website QA",
+        "shopify_url": "https://store.myshopify.com",
+        "source_type": "website",
+        "page_mappings": {
+            "/": "https://design.netlify.app/index.html",
+            "/collections": "https://design.netlify.app/collection.html",
+        },
+    }
+    resp = client.post("/api/projects", json=payload, headers=auth_header(developer_token))
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["source_type"] == "website"
+    assert body["source_url"] is None
+
+    # Verify mappings stored — fetch project and check via mappings endpoint
+    project_id = body["id"]
+    mappings_resp = client.get(
+        f"/api/projects/{project_id}/mappings",
+        headers=auth_header(developer_token),
+    )
+    assert mappings_resp.status_code == 200, mappings_resp.text
+    mappings = mappings_resp.json()
+    assert mappings["/"] == "https://design.netlify.app/index.html"
+    assert mappings["/collections"] == "https://design.netlify.app/collection.html"

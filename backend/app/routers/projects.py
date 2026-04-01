@@ -32,6 +32,11 @@ def create_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin", "developer")),
 ) -> ProjectResponse:
+    config: dict = {}
+    if payload.page_mappings:
+        config["page_mappings"] = payload.page_mappings
+        config["mappings"] = payload.page_mappings
+
     project = Project(
         name=payload.name,
         shopify_url=payload.shopify_url,
@@ -42,7 +47,7 @@ def create_project(
         figma_token=payload.figma_token,
         pass_threshold=payload.pass_threshold,
         created_by=current_user.id,
-        config={},
+        config=config,
     )
     db.add(project)
     db.commit()
@@ -95,6 +100,15 @@ def update_project(
     check_project_owner(project, current_user)
 
     update_data = payload.model_dump(exclude_unset=True)
+
+    # Handle page_mappings separately — stored in config, not a column
+    page_mappings = update_data.pop("page_mappings", None)
+    if page_mappings is not None:
+        config = dict(project.config or {})
+        config["page_mappings"] = page_mappings
+        config["mappings"] = page_mappings
+        project.config = config
+
     for field, value in update_data.items():
         setattr(project, field, value)
 
