@@ -161,6 +161,16 @@ def discover_project(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     check_project_owner(project, current_user)
 
+    # Website type: mappings are manual — return stored mappings
+    if project.source_type.value == "website":
+        mappings = (project.config or {}).get("page_mappings", {})
+        shopify_pages = [{"path": k, "name": k.strip("/") or "Homepage"} for k in mappings]
+        return {
+            "shopify_pages": shopify_pages,
+            "source_pages": [],
+            "mappings": mappings,
+        }
+
     from app.engines.discovery_engine import DiscoveryEngine
 
     engine = DiscoveryEngine()
