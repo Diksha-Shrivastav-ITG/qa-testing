@@ -12,10 +12,9 @@ from playwright.async_api import async_playwright
 
 SHOPIFY_SKIP_PREFIXES = (
     "/account",
-    "/cart",
-    "/search",
-    "/policies",
     "/password",
+    "/challenge",
+    "/checkout",
 )
 
 
@@ -93,7 +92,6 @@ class DiscoveryEngine:
         function add(href, text) {
             if (!href) return;
             try {
-                // Resolve relative URLs
                 const url = new URL(href, origin);
                 if (url.origin !== origin) return;
                 // Normalize: strip trailing slash (except root), ignore query/hash
@@ -105,8 +103,9 @@ class DiscoveryEngine:
         }
 
         // 1. All <a href> links — covers nav, product cards, banners, footer
+        //    querySelectorAll finds ALL links including hidden/collapsed mobile nav
         document.querySelectorAll('a[href]').forEach(a => {
-            add(a.href, a.innerText || a.textContent || '');
+            add(a.href, a.innerText || a.textContent || a.getAttribute('aria-label') || '');
         });
 
         // 2. data-href / data-url — common in Shopify section blocks and app embeds
@@ -125,6 +124,29 @@ class DiscoveryEngine:
         // 4. <form action="..."> — search forms, login redirects
         document.querySelectorAll('form[action]').forEach(f => {
             add(f.getAttribute('action'), f.getAttribute('aria-label') || '');
+        });
+
+        // 5. Shopify nav JSON (window.theme.navigationLinks or similar globals)
+        try {
+            const navData = window.__st?.merchantInfo?.navLinks
+                || window.theme?.navigationLinks
+                || window.navigation?.links;
+            if (Array.isArray(navData)) {
+                navData.forEach(item => {
+                    if (item.url) add(item.url, item.title || '');
+                    if (Array.isArray(item.links)) {
+                        item.links.forEach(sub => sub.url && add(sub.url, sub.title || ''));
+                    }
+                });
+            }
+        } catch(e) {}
+
+        // 6. data-navigation-link, data-nav-link attributes used by some themes
+        document.querySelectorAll('[data-navigation-link],[data-nav-link],[data-menu-link]').forEach(el => {
+            const href = el.getAttribute('data-navigation-link')
+                || el.getAttribute('data-nav-link')
+                || el.getAttribute('data-menu-link');
+            add(href, el.innerText || '');
         });
 
         return results;
@@ -173,19 +195,65 @@ class DiscoveryEngine:
         except Exception:
             pass
 
+        # Open hamburger/mobile menu to expose hidden nav links
+        hamburger_selectors = [
+            "button[aria-label*='menu' i]",
+            "button[aria-label*='navigation' i]",
+            "button[aria-label*='nav' i]",
+            "button[aria-expanded='false'][aria-controls]",
+            ".hamburger",
+            ".burger",
+            ".menu-toggle",
+            ".nav-toggle",
+            "[data-menu-toggle]",
+            "[data-nav-toggle]",
+            "[data-drawer-toggle]",
+            ".header__menu-toggle",
+            ".mobile-nav-toggle",
+            "#mobile-menu-toggle",
+        ]
+        for sel in hamburger_selectors:
+            try:
+                btn = page.locator(sel).first
+                if await btn.is_visible(timeout=500):
+                    await btn.click()
+                    await asyncio.sleep(0.8)
+                    break
+            except Exception:
+                pass
+
+        # Wait for any JS-rendered nav items to appear
+        await asyncio.sleep(1)
+
         # _LINK_JS returns [{path, name}] already deduplicated by path
         raw_links: list[dict] = await page.evaluate(self._LINK_JS)
 
+        seen_paths: set[str] = set()
         results: list[dict] = []
+
+        def add_result(path: str, name: str) -> None:
+            if path in seen_paths:
+                return
+            if any(path.startswith(prefix) for prefix in SHOPIFY_SKIP_PREFIXES):
+                return
+            seen_paths.add(path)
+            results.append({"path": path, "name": name})
+
+        # Always include homepage first
+        add_result("/", "Homepage")
+
         for link in raw_links:
             path = link.get("path", "") or "/"
             name = (link.get("name") or "").strip()
+            add_result(path, name)
 
-            # Skip unwanted Shopify paths
-            if any(path.startswith(prefix) for prefix in SHOPIFY_SKIP_PREFIXES):
-                continue
-
-            results.append({"path": path, "name": name})
+        # Always include key Shopify pages if they exist (even if not linked)
+        ALWAYS_CHECK = [
+            ("/cart", "Cart"),
+            ("/search", "Search"),
+        ]
+        for path, name in ALWAYS_CHECK:
+            add_result(path, name)
 
         return results
 

@@ -19,3 +19,9 @@ export const updateProject = (id: number, data: Record<string, unknown>) =>
   api.put(`/api/projects/${id}`, data);
 
 export const deleteProject = (id: number) => api.delete(`/api/projects/${id}`);
+
+export const getMappings = (id: number) =>
+  api.get<Record<string, string>>(`/api/projects/${id}/mappings`);
+
+export const updateMappings = (id: number, mappings: Record<string, string>) =>
+  api.put(`/api/projects/${id}/mappings`, mappings);

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getProject, updateProject } from "../api/projects";
+import { getProject, updateProject, deleteProject, getMappings, updateMappings } from "../api/projects";
 import { listRuns, startRun } from "../api/runs";
 import RunQAModal from "../components/runs/RunQAModal";
 
@@ -19,6 +19,11 @@ interface Project {
   shopify_url: string;
   source_type: string;
   source_url: string;
+}
+
+interface MappingRow {
+  shopify_path: string;
+  design_url: string;
 }
 
 type Tab = "runs" | "settings";
@@ -48,6 +53,8 @@ const ProjectDetailPage = () => {
   const [settingsForm, setSettingsForm] = useState<Partial<Project>>({});
   const [editMode, setEditMode] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
+  const [mappingRows, setMappingRows] = useState<MappingRow[]>([]);
+  const [editingMappings, setEditingMappings] = useState(false);
 
   const {
     data: project,
@@ -94,6 +101,51 @@ const ProjectDetailPage = () => {
       setEditMode(false);
     },
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteProject(projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      navigate("/");
+    },
+  });
+
+  const { data: mappingsData } = useQuery({
+    queryKey: ["mappings", projectId],
+    queryFn: () => getMappings(projectId).then((res) => res.data),
+    enabled: !!projectId,
+  });
+
+  const mappingsMutation = useMutation({
+    mutationFn: (mappings: Record<string, string>) =>
+      updateMappings(projectId, mappings),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["mappings", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      setEditingMappings(false);
+    },
+  });
+
+  const startEditMappings = () => {
+    const existing = mappingsData ?? {};
+    const rows = Object.entries(existing).map(([k, v]) => ({
+      shopify_path: k,
+      design_url: v,
+    }));
+    if (rows.length === 0) rows.push({ shopify_path: "/", design_url: "" });
+    setMappingRows(rows);
+    setEditingMappings(true);
+  };
+
+  const saveMappings = () => {
+    const mappings: Record<string, string> = {};
+    for (const row of mappingRows) {
+      if (row.shopify_path.trim() && row.design_url.trim()) {
+        mappings[row.shopify_path.trim()] = row.design_url.trim();
+      }
+    }
+    mappingsMutation.mutate(mappings);
+  };
 
   const runs: Run[] = runsData?.items ?? [];
   const activeRun = runs.find((r) => r.status === "running" || r.status === "pending");
@@ -253,58 +305,33 @@ const ProjectDetailPage = () => {
 
       {/* Settings Tab */}
       {activeTab === "settings" && (
-        <div className="max-w-lg">
-          {!editMode ? (
-            <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
-              <div>
-                <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                  Shopify URL
-                </div>
-                <div className="text-sm text-gray-900">{project.shopify_url}</div>
-              </div>
-              <div>
-                <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                  Source Type
-                </div>
-                <div className="text-sm text-gray-900 capitalize">
-                  {project.source_type === "website" ? "Website" : project.source_type}
-                </div>
-              </div>
-              {project.source_type !== "website" && (
-                <div>
-                  <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                    Source URL
-                  </div>
-                  <div className="text-sm text-gray-900 break-all">
-                    {project.source_url}
-                  </div>
-                </div>
-              )}
-              <button
-                onClick={() => {
-                  setSettingsForm({
-                    shopify_url: project.shopify_url,
-                    source_url: project.source_url,
-                  });
-                  setEditMode(true);
-                }}
-                className="px-4 py-2 text-sm font-medium text-indigo-600 border border-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors"
-              >
-                Edit Settings
-              </button>
+        <div className="max-w-2xl space-y-6">
+          {/* Shopify URL */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
+            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              Shopify URL
             </div>
-          ) : (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                updateMutation.mutate(settingsForm as Record<string, unknown>);
-              }}
-              className="bg-white border border-gray-200 rounded-lg p-6 space-y-4"
-            >
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Shopify URL
-                </label>
+            {!editMode ? (
+              <>
+                <div className="text-sm text-gray-900">{project.shopify_url}</div>
+                <button
+                  onClick={() => {
+                    setSettingsForm({ shopify_url: project.shopify_url });
+                    setEditMode(true);
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-indigo-600 border border-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors"
+                >
+                  Edit
+                </button>
+              </>
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  updateMutation.mutate(settingsForm as Record<string, unknown>);
+                }}
+                className="space-y-3"
+              >
                 <input
                   type="url"
                   value={settingsForm.shopify_url ?? ""}
@@ -313,38 +340,183 @@ const ProjectDetailPage = () => {
                   }
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
+                <div className="flex gap-3">
+                  <button
+                    type="submit"
+                    disabled={updateMutation.isPending}
+                    className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+                  >
+                    {updateMutation.isPending ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditMode(false)}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+
+          {/* Design Reference Pages */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                Design Reference Pages
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Source URL
-                </label>
-                <input
-                  type="url"
-                  value={settingsForm.source_url ?? ""}
-                  onChange={(e) =>
-                    setSettingsForm((p) => ({ ...p, source_url: e.target.value }))
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div className="flex gap-3">
+              {!editingMappings && (
                 <button
-                  type="submit"
-                  disabled={updateMutation.isPending}
-                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+                  onClick={startEditMappings}
+                  className="px-3 py-1.5 text-xs font-medium text-indigo-600 border border-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors"
                 >
-                  {updateMutation.isPending ? "Saving..." : "Save Changes"}
+                  Edit
                 </button>
+              )}
+            </div>
+
+            {!editingMappings ? (
+              <>
+                {mappingsData && Object.keys(mappingsData).length > 0 ? (
+                  <div className="space-y-2">
+                    {Object.entries(mappingsData).map(([path, url]) => (
+                      <div
+                        key={path}
+                        className="flex gap-3 items-center text-sm border border-gray-100 rounded-lg p-3"
+                      >
+                        <span className="font-mono text-gray-700 bg-gray-50 px-2 py-0.5 rounded text-xs">
+                          {path}
+                        </span>
+                        <span className="text-gray-400">→</span>
+                        <span className="text-gray-600 break-all text-xs">
+                          {url}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400">
+                    No reference pages configured. Click Edit to add design URLs
+                    for comparison testing.
+                  </p>
+                )}
+              </>
+            ) : (
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  {mappingRows.map((row, index) => (
+                    <div key={index} className="flex gap-2 items-start">
+                      <input
+                        type="text"
+                        value={row.shopify_path}
+                        onChange={(e) =>
+                          setMappingRows((prev) =>
+                            prev.map((r, i) =>
+                              i === index
+                                ? { ...r, shopify_path: e.target.value }
+                                : r
+                            )
+                          )
+                        }
+                        placeholder="Shopify path, e.g. /"
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <input
+                        type="url"
+                        value={row.design_url}
+                        onChange={(e) =>
+                          setMappingRows((prev) =>
+                            prev.map((r, i) =>
+                              i === index
+                                ? { ...r, design_url: e.target.value }
+                                : r
+                            )
+                          )
+                        }
+                        placeholder="Design URL"
+                        className="flex-[2] px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      {mappingRows.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMappingRows((prev) =>
+                              prev.filter((_, i) => i !== index)
+                            )
+                          }
+                          className="px-2 py-2 text-red-500 hover:text-red-700 text-sm"
+                          title="Remove row"
+                        >
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M6 18L18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
                 <button
                   type="button"
-                  onClick={() => setEditMode(false)}
-                  className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  onClick={() =>
+                    setMappingRows((prev) => [
+                      ...prev,
+                      { shopify_path: "", design_url: "" },
+                    ])
+                  }
+                  className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
                 >
-                  Cancel
+                  + Add Page
                 </button>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={saveMappings}
+                    disabled={mappingsMutation.isPending}
+                    className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+                  >
+                    {mappingsMutation.isPending ? "Saving..." : "Save Mappings"}
+                  </button>
+                  <button
+                    onClick={() => setEditingMappings(false)}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
-            </form>
-          )}
+            )}
+          </div>
+
+          {/* Delete Project */}
+          <div className="bg-white border border-red-200 rounded-lg p-6 space-y-3">
+            <div className="text-xs font-medium text-red-500 uppercase tracking-wide">
+              Danger Zone
+            </div>
+            <p className="text-sm text-gray-500">
+              Permanently delete this project and all its runs, captures, and results.
+            </p>
+            <button
+              onClick={() => {
+                if (window.confirm("Are you sure you want to delete this project? This cannot be undone.")) {
+                  deleteMutation.mutate();
+                }
+              }}
+              disabled={deleteMutation.isPending}
+              className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-60 transition-colors"
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete Project"}
+            </button>
+          </div>
         </div>
       )}
 

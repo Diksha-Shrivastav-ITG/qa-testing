@@ -13,20 +13,6 @@ interface ProjectCardProps {
 }
 
 const sourceTypeBadge = (sourceType: string) => {
-  if (sourceType === "figma") {
-    return (
-      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-        Figma
-      </span>
-    );
-  }
-  if (sourceType === "website") {
-    return (
-      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-        Website
-      </span>
-    );
-  }
   if (sourceType === "none") {
     return (
       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
@@ -35,8 +21,8 @@ const sourceTypeBadge = (sourceType: string) => {
     );
   }
   return (
-    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-      Framer
+    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+      Design
     </span>
   );
 };

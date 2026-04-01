@@ -72,7 +72,7 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
   const [modalTab, setModalTab] = useState<"full" | "customize">("full");
   const [fullQA, setFullQA] = useState(true);
   const [pages, setPages] = useState<PageEntry[]>(DEFAULT_PAGES);
-  const [testMode, setTestMode] = useState<"design" | "ai">("ai");
+  const [testMode, setTestMode] = useState<"design" | "ai">("design");
   // link_audit is included by default and coupled to "qa"
   const [selectedTests, setSelectedTests] = useState<Set<string>>(
     () => new Set([...TEST_TYPES.map((t) => t.key), "link_audit"])

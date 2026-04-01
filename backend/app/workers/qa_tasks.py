@@ -231,14 +231,7 @@ async def _run_qa_job_async(
 
         page_mappings: dict[str, str] = project.config.get("page_mappings", {})
 
-        has_design_source = (
-            project.source_type == SourceType.website
-            or (
-                project.source_url
-                and project.source_url.strip()
-                and project.source_type != SourceType.none
-            )
-        )
+        has_design_source = bool(page_mappings)
 
         if not page_mappings:
             discovery = DiscoveryEngine()
@@ -308,8 +301,8 @@ async def _run_qa_job_async(
         # ---- Phase 2: Capture ----
         capture_engine = CaptureEngine(storage_path=settings.storage_path)
 
-        # In AI mode or no design source — only capture Shopify
-        skip_design = test_mode == "ai" or not has_design_source
+        # Skip design only if there are no design references
+        skip_design = not has_design_source
         sources_per_page = 1 if skip_design else 2
         total_captures = len(page_mappings) * len(BREAKPOINTS) * sources_per_page
         captured_count = 0
@@ -336,10 +329,7 @@ async def _run_qa_job_async(
                 design_results = []
             else:
                 # Capture Shopify + Design simultaneously
-                if project.source_type == SourceType.website:
-                    source_url = source_path  # full URL stored in mapping
-                else:
-                    source_url = (project.source_url or "").rstrip("/") + source_path
+                source_url = source_path  # full URL stored in mapping
                 shopify_results, design_results = await asyncio.gather(
                     capture_engine.capture_page(
                         url=shopify_url,
@@ -355,7 +345,6 @@ async def _run_qa_job_async(
                         run_dir=run_dir,
                         source="design",
                         breakpoints=BREAKPOINTS,
-                        password=project.framer_password if project.source_type != SourceType.website else None,
                     ),
                 )
 

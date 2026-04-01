@@ -148,7 +148,13 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
     project_name = project.name if project else "Unknown Project"
     shopify_url = project.shopify_url if project else "N/A"
     source_type = (project.source_type.value.title() if hasattr(project.source_type, "value") else str(project.source_type)) if project else "N/A"
-    source_url = project.source_url if project and project.source_url else "N/A (AI testing only)"
+    page_mappings = (project.config or {}).get("page_mappings", {}) if project else {}
+    if project and project.source_url:
+        source_url = project.source_url
+    elif page_mappings:
+        source_url = f"Custom design references ({len(page_mappings)} pages)"
+    else:
+        source_url = "N/A (AI testing only)"
     test_mode = getattr(run, "test_mode", "design") or "design"
     run_date = _fmt_date(run.started_at)
 
@@ -679,7 +685,7 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
       <tr><td>Version Tested:</td><td>Current live build — Run #{run.run_number}</td></tr>
       <tr><td>Test URL:</td><td>{shopify_url}</td></tr>
       <tr><td>Design Source:</td><td>{source_url}</td></tr>
-      <tr><td>QA Type:</td><td>{"AI-Powered Analysis + Functional + ADA Compliance" if test_mode == "ai" or source_url == "N/A (AI testing only)" else "Design Comparison + Functional + ADA Compliance"}</td></tr>
+      <tr><td>QA Type:</td><td>{"AI-Powered Analysis + Functional + ADA Compliance" if not page_mappings and source_url == "N/A (AI testing only)" else "Design Comparison + Functional + ADA Compliance"}</td></tr>
       <tr><td>Devices Tested:</td><td>Mobile (375px, 425px), Tablet (768px), Desktop (1024px, 1280px, 1440px, 1920px)</td></tr>
       <tr><td>Report Date:</td><td>{run_date}</td></tr>
     </table>
