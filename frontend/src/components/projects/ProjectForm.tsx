@@ -78,7 +78,7 @@ const ProjectForm = ({ onSubmit, onCancel, isLoading }: ProjectFormProps) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
         <h2 className="text-xl font-semibold text-gray-900 mb-6">
-          New Project
+          New Projectss 
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
