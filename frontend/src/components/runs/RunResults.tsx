@@ -74,16 +74,16 @@ interface RunData {
 const BACKEND = "";
 
 const SEVERITY_STYLES: Record<string, string> = {
-  critical: "bg-red-100 text-red-700",
-  major: "bg-orange-100 text-orange-700",
-  minor: "bg-yellow-100 text-yellow-600",
-  error: "bg-red-100 text-red-700",
-  warning: "bg-orange-100 text-orange-700",
-  notice: "bg-blue-100 text-blue-600",
+  critical: "bg-red-500/10 text-red-400 border border-red-500/25",
+  major:    "bg-orange-500/10 text-orange-400 border border-orange-500/25",
+  minor:    "bg-yellow-500/10 text-yellow-400 border border-yellow-500/25",
+  error:    "bg-red-500/10 text-red-400 border border-red-500/25",
+  warning:  "bg-orange-500/10 text-orange-400 border border-orange-500/25",
+  notice:   "bg-blue-500/10 text-blue-400 border border-blue-500/25",
 };
 
 const sevStyle = (s: string) =>
-  SEVERITY_STYLES[s?.toLowerCase()] ?? "bg-gray-100 text-gray-600";
+  SEVERITY_STYLES[s?.toLowerCase()] ?? "bg-gray-100 dark:bg-slate-700/60 text-gray-500 dark:text-slate-400 border border-gray-300 dark:border-slate-600";
 
 const SEVERITY_ORDER: Record<string, number> = {
   critical: 0,
@@ -159,7 +159,7 @@ interface CollapsibleProps {
   children: React.ReactNode;
 }
 
-const Collapsible = ({ defaultOpen = true, header, children }: CollapsibleProps) => {
+const Collapsible = ({ defaultOpen = false, header, children }: CollapsibleProps) => {
   const [open, setOpen] = useState(defaultOpen);
   const toggle = useCallback(() => setOpen((v) => !v), []);
   return (
@@ -182,45 +182,47 @@ const IssueCard = ({ issue, num }: IssueCardProps) => {
 
   return (
     <div
-      className="p-3 bg-gray-50 rounded border border-gray-100 cursor-pointer hover:bg-gray-100 transition-colors"
+      className="p-3 bg-gray-50 dark:bg-slate-700/30 rounded-xl border border-gray-200 dark:border-slate-700/50 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700/50 hover:border-gray-300 dark:hover:border-slate-600/60 transition-all"
       onClick={() => setExpanded((v) => !v)}
     >
       <div className="flex items-start gap-3">
-        <span className="text-xs font-mono text-gray-400 mt-0.5 shrink-0">
+        <span className="text-[10px] font-mono text-gray-400 dark:text-slate-600 mt-0.5 shrink-0 pt-0.5">
           {num}
         </span>
         <span
-          className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${sevStyle(
-            issue.severity
-          )}`}
+          className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${sevStyle(issue.severity)}`}
         >
           {issue.severity}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm text-gray-800">{issue.description}</p>
+          <p className="text-sm text-slate-200 leading-relaxed">{issue.description}</p>
           {issue.element_selector && (
-            <p className="text-xs text-gray-400 mt-0.5 truncate">
+            <p className="text-[10px] font-mono text-gray-400 dark:text-slate-500 mt-1 truncate bg-gray-100 dark:bg-slate-800/60 px-2 py-0.5 rounded">
               {issue.element_selector}
             </p>
           )}
-          <div className="flex gap-3 mt-1">
-            <span className="text-xs text-gray-400 capitalize">{issue.type}</span>
+          <div className="flex gap-3 mt-1.5">
+            <span className="text-[10px] text-slate-500 capitalize font-medium">{issue.type}</span>
             {issue.breakpoint && (
-              <span className="text-xs text-gray-400">
-                {issue.breakpoint}px
-              </span>
+              <span className="text-[10px] text-slate-500">{issue.breakpoint}px</span>
             )}
           </div>
 
           {expanded && issue.ai_suggestion && (
             <div className="mt-3">
-              <div className="text-xs bg-blue-50 text-blue-700 px-3 py-2 rounded">
-                <strong>AI Suggestion:</strong> {issue.ai_suggestion}
+              <div className="text-xs bg-violet-500/10 border border-violet-500/20 text-violet-300 px-3 py-2.5 rounded-lg leading-relaxed">
+                <span className="font-semibold text-violet-400">AI Suggestion: </span>
+                {issue.ai_suggestion}
               </div>
             </div>
           )}
         </div>
-        <span className="text-xs text-gray-300">{expanded ? "▲" : "▼"}</span>
+        <svg
+          className={`w-3.5 h-3.5 text-gray-400 dark:text-slate-600 shrink-0 mt-0.5 transition-transform ${expanded ? "rotate-180" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+        </svg>
       </div>
     </div>
   );
@@ -247,17 +249,22 @@ const TypeSubsection = ({
       header={(open, toggle) => (
         <button
           onClick={toggle}
-          className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-50 transition-colors text-left rounded"
+          className="w-full flex items-center justify-between px-3 py-2 hover:bg-slate-700/30 transition-colors text-left rounded-lg"
         >
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+            <span className="text-[10px] font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-widest">
               {typeLabel(typeName)}
             </span>
-            <span className="text-xs text-gray-400">
-              ({issues.length} issue{issues.length !== 1 ? "s" : ""})
+            <span className="text-[10px] text-gray-500 dark:text-slate-600 bg-gray-200 dark:bg-slate-700/50 px-1.5 py-0.5 rounded-full">
+              {issues.length}
             </span>
           </div>
-          <span className="text-gray-300 text-xs">{open ? "▲" : "▼"}</span>
+          <svg
+            className={`w-3.5 h-3.5 text-slate-600 transition-transform ${open ? "rotate-180" : ""}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+          </svg>
         </button>
       )}
     >
@@ -323,51 +330,56 @@ const PageSection = ({
 
   return (
     <Collapsible
-      defaultOpen={true}
+      defaultOpen={false}
       header={(open, toggle) => (
         <button
           onClick={toggle}
-          className="w-full flex items-center justify-between px-5 py-4 bg-gray-50 hover:bg-gray-100 transition-colors text-left border-b border-gray-200"
+          className="w-full flex items-center justify-between px-5 py-4 bg-gray-100 dark:bg-slate-700/40 hover:bg-gray-200 dark:hover:bg-slate-700/60 transition-colors text-left border-b border-gray-200 dark:border-slate-700/60"
         >
           <div className="flex items-center gap-3">
-            <span className="bg-blue-600 text-white text-xs font-bold rounded-full w-7 h-7 flex items-center justify-center">
+            <span className="bg-gradient-to-br from-violet-600 to-indigo-600 text-white text-xs font-bold rounded-lg w-7 h-7 flex items-center justify-center shadow-lg shadow-violet-500/20">
               {pageNumber}
             </span>
-            <span className="font-semibold text-gray-900 text-base">
+            <span className="font-semibold text-gray-900 dark:text-white text-sm">
               {pageLabel(pageName)}
             </span>
             <span
-              className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+              className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
                 issues.length > 0
-                  ? "bg-red-100 text-red-700"
-                  : "bg-green-100 text-green-700"
+                  ? "bg-red-500/10 text-red-400 border-red-500/25"
+                  : "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
               }`}
             >
               {issues.length} issue{issues.length !== 1 ? "s" : ""}
             </span>
             {critCount > 0 && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-red-600 text-white font-medium">
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/25 font-semibold">
                 {critCount} critical
               </span>
             )}
             {majorCount > 0 && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-orange-500 text-white font-medium">
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/25 font-semibold">
                 {majorCount} major
               </span>
             )}
           </div>
-          <span className="text-gray-400">{open ? "▲" : "▼"}</span>
+          <svg
+            className={`w-4 h-4 text-gray-400 dark:text-slate-500 transition-transform ${open ? "rotate-180" : ""}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+          </svg>
         </button>
       )}
     >
-      <div className="flex gap-6 p-5">
+      <div className="flex gap-5 p-5">
         {/* Left: full-page screenshot */}
-        <div className="w-[340px] shrink-0">
+        <div className="w-[300px] shrink-0">
           <div className="sticky top-4">
-            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-              Full Page Screenshot
+            <div className="text-[10px] font-semibold text-gray-500 dark:text-slate-500 uppercase tracking-widest mb-2">
+              Screenshot
             </div>
-            <div className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
+            <div className="border border-gray-200 dark:border-slate-700/60 rounded-xl overflow-hidden bg-gray-50 dark:bg-slate-800/40">
               {bestCapture?.image_url ? (
                 <img
                   src={captureUrl(bestCapture.image_url)}
@@ -376,13 +388,16 @@ const PageSection = ({
                   style={{ maxHeight: "800px" }}
                 />
               ) : (
-                <div className="flex items-center justify-center h-48 text-gray-400 text-sm">
-                  No screenshot available
+                <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-slate-500 text-sm gap-2">
+                  <svg className="w-8 h-8 text-gray-300 dark:text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                  </svg>
+                  No screenshot
                 </div>
               )}
             </div>
             {bestCapture && (
-              <div className="text-xs text-gray-400 mt-1 text-center">
+              <div className="text-[10px] text-gray-400 dark:text-slate-600 mt-1.5 text-center">
                 {bestCapture.breakpoint}px breakpoint
               </div>
             )}
@@ -392,8 +407,13 @@ const PageSection = ({
         {/* Right: issues list grouped by type */}
         <div className="flex-1 min-w-0 space-y-3">
           {issues.length === 0 ? (
-            <div className="text-center py-8 text-gray-400">
-              <div className="text-2xl mb-2">No issues found for this page</div>
+            <div className="text-center py-10">
+              <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-3">
+                <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <p className="text-sm font-medium text-emerald-400">No issues on this page</p>
             </div>
           ) : (
             orderedTypes.map((typeName) => (
@@ -424,30 +444,37 @@ const AccessibilitySection = ({ items, sectionNum }: AccSectionProps) => {
   let sub = 0;
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
+    <div className="border border-gray-200 dark:border-slate-700/60 rounded-2xl overflow-hidden">
       <Collapsible
-        defaultOpen={true}
+        defaultOpen={false}
         header={(open, toggle) => (
           <button
             onClick={toggle}
-            className="w-full flex items-center justify-between px-5 py-3.5 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+            className="w-full flex items-center justify-between px-5 py-4 bg-gray-100 dark:bg-slate-700/40 hover:bg-gray-200 dark:hover:bg-slate-700/60 transition-colors text-left"
           >
             <div className="flex items-center gap-3">
-              <span className="text-lg">&#9855;</span>
-              <span className="font-semibold text-gray-900">
+              <div className="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-sm">
+                ♿
+              </div>
+              <span className="font-semibold text-gray-900 dark:text-white text-sm">
                 {sectionNum}. ADA / Accessibility Issues
               </span>
               <span
-                className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
                   items.length > 0
-                    ? "bg-red-100 text-red-700"
-                    : "bg-green-100 text-green-700"
+                    ? "bg-red-500/10 text-red-400 border-red-500/25"
+                    : "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
                 }`}
               >
                 {items.length} issue{items.length !== 1 ? "s" : ""}
               </span>
             </div>
-            <span className="text-gray-400">{open ? "▲" : "▼"}</span>
+            <svg
+              className={`w-4 h-4 text-gray-400 dark:text-slate-500 transition-transform ${open ? "rotate-180" : ""}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
           </button>
         )}
       >
@@ -457,41 +484,39 @@ const AccessibilitySection = ({ items, sectionNum }: AccSectionProps) => {
             return (
               <div
                 key={page}
-                className="border border-gray-100 rounded-lg p-3 space-y-2"
+                className="border border-gray-200 dark:border-slate-700/50 rounded-xl p-3 space-y-2"
               >
-                <h4 className="text-sm font-medium text-gray-700">
+                <h4 className="text-xs font-semibold text-gray-600 dark:text-slate-400 mb-2">
                   {sectionNum}.{sub} {pageLabel(page)}
                 </h4>
                 {pageItems.map((item, idx) => (
                   <div
                     key={item.id}
-                    className="p-2 bg-gray-50 rounded border border-gray-100 text-sm"
+                    className="p-2.5 bg-gray-50 dark:bg-slate-700/30 rounded-lg border border-gray-200 dark:border-slate-700/50 text-sm"
                   >
                     <div className="flex items-start gap-2">
-                      <span className="text-xs font-mono text-gray-400">
+                      <span className="text-[10px] font-mono text-gray-400 dark:text-slate-600 pt-0.5 shrink-0">
                         {sectionNum}.{sub}.{idx + 1}
                       </span>
                       <span
-                        className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${sevStyle(
-                          item.severity
-                        )}`}
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${sevStyle(item.severity)}`}
                       >
                         {item.severity}
                       </span>
                       <div className="min-w-0">
-                        <p className="text-gray-800">{item.description}</p>
+                        <p className="text-gray-800 dark:text-slate-200 text-sm">{item.description}</p>
                         {item.wcag && (
-                          <p className="text-xs text-blue-500 mt-0.5">
+                          <p className="text-xs text-blue-400 mt-0.5">
                             WCAG: {item.wcag}
                           </p>
                         )}
                         {item.element && (
-                          <p className="text-xs text-gray-400 font-mono mt-0.5 truncate">
+                          <p className="text-[10px] text-gray-400 dark:text-slate-500 font-mono mt-0.5 truncate bg-gray-100 dark:bg-slate-800/50 px-2 py-0.5 rounded">
                             {item.element}
                           </p>
                         )}
                         {item.help_text && (
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mt-1 leading-relaxed">
                             {item.help_text}
                           </p>
                         )}
@@ -503,7 +528,7 @@ const AccessibilitySection = ({ items, sectionNum }: AccSectionProps) => {
             );
           })}
           {items.length === 0 && (
-            <p className="text-sm text-gray-400 text-center py-4">
+            <p className="text-sm text-gray-400 dark:text-slate-500 text-center py-4">
               No accessibility issues found
             </p>
           )}
@@ -525,30 +550,37 @@ const LinkAuditSection = ({ items, sectionNum }: LinkSectionProps) => {
   const byPage = groupBy(items, (i) => i.page);
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
+    <div className="border border-gray-200 dark:border-slate-700/60 rounded-2xl overflow-hidden">
       <Collapsible
         defaultOpen={false}
         header={(open, toggle) => (
           <button
             onClick={toggle}
-            className="w-full flex items-center justify-between px-5 py-3.5 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+            className="w-full flex items-center justify-between px-5 py-4 bg-gray-100 dark:bg-slate-700/40 hover:bg-gray-200 dark:hover:bg-slate-700/60 transition-colors text-left"
           >
             <div className="flex items-center gap-3">
-              <span className="text-lg">&#128279;</span>
-              <span className="font-semibold text-gray-900">
+              <div className="w-7 h-7 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-sm">
+                🔗
+              </div>
+              <span className="font-semibold text-gray-900 dark:text-white text-sm">
                 {sectionNum}. Link & Button Audit
               </span>
               <span
-                className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
                   issueItems.length > 0
-                    ? "bg-red-100 text-red-700"
-                    : "bg-green-100 text-green-700"
+                    ? "bg-red-500/10 text-red-400 border-red-500/25"
+                    : "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
                 }`}
               >
                 {issueItems.length} issue{issueItems.length !== 1 ? "s" : ""}
               </span>
             </div>
-            <span className="text-gray-400">{open ? "▲" : "▼"}</span>
+            <svg
+              className={`w-4 h-4 text-gray-400 dark:text-slate-500 transition-transform ${open ? "rotate-180" : ""}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
           </button>
         )}
       >
@@ -556,43 +588,46 @@ const LinkAuditSection = ({ items, sectionNum }: LinkSectionProps) => {
           {Object.entries(byPage).map(([page, pageItems]) => (
             <div
               key={page}
-              className="border border-gray-100 rounded-lg p-3 space-y-1"
+              className="border border-gray-200 dark:border-slate-700/50 rounded-xl p-3 space-y-1"
             >
-              <h4 className="text-sm font-medium text-gray-700 mb-2">
-                {pageLabel(page)}
+              <h4 className="text-xs font-semibold text-slate-400 mb-2 flex items-center justify-between">
+                <span>{pageLabel(page)}</span>
+                <span className="text-slate-500 font-normal">
+                  {pageItems.length} link{pageItems.length !== 1 ? "s" : ""}
+                </span>
               </h4>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="text-left text-gray-500 border-b">
-                      <th className="py-1 pr-3">Type</th>
-                      <th className="py-1 pr-3">Text</th>
-                      <th className="py-1 pr-3">Destination</th>
-                      <th className="py-1 pr-3">Has href</th>
-                      <th className="py-1">Issue</th>
+                    <tr className="text-left text-gray-500 dark:text-slate-500 border-b border-gray-200 dark:border-slate-700/60">
+                      <th className="py-1.5 pr-3">Type</th>
+                      <th className="py-1.5 pr-3">Text</th>
+                      <th className="py-1.5 pr-3">Destination</th>
+                      <th className="py-1.5 pr-3">Has href</th>
+                      <th className="py-1.5">Issue</th>
                     </tr>
                   </thead>
                   <tbody>
                     {pageItems.map((item) => (
                       <tr
                         key={item.id}
-                        className={`border-b border-gray-50 ${
-                          item.issue ? "bg-red-50" : ""
+                        className={`border-b border-gray-100 dark:border-slate-700/40 ${
+                          item.issue ? "bg-red-500/5" : ""
                         }`}
                       >
-                        <td className="py-1 pr-3 font-mono">
+                        <td className="py-1.5 pr-3 font-mono text-gray-500 dark:text-slate-400">
                           {item.element_type}
                         </td>
-                        <td className="py-1 pr-3 max-w-[150px] truncate">
+                        <td className="py-1.5 pr-3 max-w-[150px] truncate text-gray-700 dark:text-slate-300">
                           {item.text || "\u2014"}
                         </td>
-                        <td className="py-1 pr-3 max-w-[200px] truncate text-blue-500">
+                        <td className="py-1.5 pr-3 max-w-[200px] truncate text-blue-400">
                           {item.destination || item.href || "\u2014"}
                         </td>
-                        <td className="py-1 pr-3">
-                          {item.has_href ? "\u2713" : "\u2717"}
+                        <td className="py-1.5 pr-3 text-gray-700 dark:text-slate-300">
+                          {item.has_href ? "✓" : "✗"}
                         </td>
-                        <td className="py-1 text-red-600">
+                        <td className="py-1.5 text-red-400">
                           {item.issue || "\u2014"}
                         </td>
                       </tr>
@@ -603,7 +638,7 @@ const LinkAuditSection = ({ items, sectionNum }: LinkSectionProps) => {
             </div>
           ))}
           {items.length === 0 && (
-            <p className="text-sm text-gray-400 text-center py-4">
+            <p className="text-sm text-gray-400 dark:text-slate-500 text-center py-4">
               No links audited
             </p>
           )}
@@ -632,45 +667,47 @@ const SeoSection = ({ items, sectionNum }: { items: SeoItem[]; sectionNum: numbe
   const grouped = groupBy(items, (i) => i.page);
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
+    <div className="border border-gray-200 dark:border-slate-700/60 rounded-2xl overflow-hidden">
       <Collapsible
-        defaultOpen={failed > 0}
+        defaultOpen={false}
         header={(open, toggle) => (
-          <button onClick={toggle} className="w-full flex items-center justify-between px-5 py-4 bg-gray-50 hover:bg-gray-100 text-left border-b border-gray-200">
+          <button onClick={toggle} className="w-full flex items-center justify-between px-5 py-4 bg-gray-100 dark:bg-slate-700/40 hover:bg-gray-200 dark:hover:bg-slate-700/60 text-left border-b border-gray-200 dark:border-slate-700/60 transition-colors">
             <div className="flex items-center gap-3">
-              <span className="text-lg">🔍</span>
-              <span className="font-semibold text-gray-900">{sectionNum}. SEO Analysis</span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">{passed} passed</span>
-              {failed > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">{failed} issues</span>}
+              <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-sm">🔍</div>
+              <span className="font-semibold text-gray-900 dark:text-white text-sm">{sectionNum}. SEO Analysis</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 font-semibold">{passed} passed</span>
+              {failed > 0 && <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/25 font-semibold">{failed} issues</span>}
             </div>
-            <span className="text-gray-400">{open ? "▲" : "▼"}</span>
+            <svg className={`w-4 h-4 text-gray-400 dark:text-slate-500 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
           </button>
         )}
       >
         <div className="p-4 space-y-4">
           {Object.entries(grouped).map(([page, pageItems]) => (
             <div key={page}>
-              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{pageLabel(page)}</h4>
-              <div className="space-y-1">
+              <h4 className="text-[10px] font-semibold text-gray-500 dark:text-slate-500 uppercase tracking-widest mb-2">{pageLabel(page)}</h4>
+              <div className="space-y-1.5">
                 {pageItems.map((item) => (
-                  <div key={item.id} className={`flex items-start gap-3 px-3 py-2 rounded-lg text-sm ${item.passed ? "bg-green-50" : "bg-red-50"}`}>
-                    <span className="mt-0.5">{item.passed ? "✅" : "❌"}</span>
+                  <div key={item.id} className={`flex items-start gap-3 px-3 py-2.5 rounded-xl text-sm border ${item.passed ? "bg-emerald-500/5 border-emerald-500/15" : "bg-red-500/5 border-red-500/15"}`}>
+                    <span className="mt-0.5 shrink-0">{item.passed ? "✅" : "❌"}</span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-gray-900">{item.label}</span>
+                        <span className="font-medium text-gray-800 dark:text-slate-200 text-xs">{item.label}</span>
                         {item.severity && !item.passed && (
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${sevStyle(item.severity)}`}>{item.severity}</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${sevStyle(item.severity)}`}>{item.severity}</span>
                         )}
                       </div>
-                      <p className="text-xs text-gray-500 mt-0.5">{item.value}</p>
-                      {item.recommendation && <p className="text-xs text-orange-600 mt-0.5">{item.recommendation}</p>}
+                      <p className="text-xs text-gray-500 dark:text-slate-500 mt-0.5">{item.value}</p>
+                      {item.recommendation && <p className="text-xs text-orange-400 mt-0.5">{item.recommendation}</p>}
                     </div>
                   </div>
                 ))}
               </div>
             </div>
           ))}
-          {items.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No SEO data</p>}
+          {items.length === 0 && <p className="text-sm text-gray-400 dark:text-slate-500 text-center py-4">No SEO data</p>}
         </div>
       </Collapsible>
     </div>
@@ -704,63 +741,65 @@ const PerfSection = ({ items, sectionNum }: { items: PerfItem[]; sectionNum: num
   const totalIssues = items.reduce((s, i) => s + (i.issues?.length ?? 0), 0);
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
+    <div className="border border-gray-200 dark:border-slate-700/60 rounded-2xl overflow-hidden">
       <Collapsible
-        defaultOpen={true}
+        defaultOpen={false}
         header={(open, toggle) => (
-          <button onClick={toggle} className="w-full flex items-center justify-between px-5 py-4 bg-gray-50 hover:bg-gray-100 text-left border-b border-gray-200">
+          <button onClick={toggle} className="w-full flex items-center justify-between px-5 py-4 bg-gray-100 dark:bg-slate-700/40 hover:bg-gray-200 dark:hover:bg-slate-700/60 text-left border-b border-gray-200 dark:border-slate-700/60 transition-colors">
             <div className="flex items-center gap-3">
-              <span className="text-lg">⚡</span>
-              <span className="font-semibold text-gray-900">{sectionNum}. Performance</span>
-              {totalIssues > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">{totalIssues} issues</span>}
+              <div className="w-7 h-7 rounded-lg bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center text-sm">⚡</div>
+              <span className="font-semibold text-gray-900 dark:text-white text-sm">{sectionNum}. Performance</span>
+              {totalIssues > 0 && <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/25 font-semibold">{totalIssues} issues</span>}
             </div>
-            <span className="text-gray-400">{open ? "▲" : "▼"}</span>
+            <svg className={`w-4 h-4 text-gray-400 dark:text-slate-500 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
           </button>
         )}
       >
         <div className="p-4 space-y-4">
           {items.map((p) => (
             <div key={p.id}>
-              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">{pageLabel(p.page)}</h4>
+              <h4 className="text-[10px] font-semibold text-gray-500 dark:text-slate-500 uppercase tracking-widest mb-3">{pageLabel(p.page)}</h4>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-                <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
-                  <div className={`text-lg font-bold ${p.load_time_ms > 5000 ? "text-red-600" : p.load_time_ms > 3000 ? "text-orange-600" : "text-green-600"}`}>{fmtMs(p.load_time_ms)}</div>
-                  <div className="text-[10px] text-gray-500 uppercase">Load Time</div>
+                <div className="bg-gray-100 dark:bg-slate-700/40 rounded-xl px-3 py-2.5 text-center border border-gray-200 dark:border-slate-700/50">
+                  <div className={`text-lg font-bold ${p.load_time_ms > 5000 ? "text-red-400" : p.load_time_ms > 3000 ? "text-orange-400" : "text-emerald-400"}`}>{fmtMs(p.load_time_ms)}</div>
+                  <div className="text-[10px] text-gray-500 dark:text-slate-500 uppercase mt-0.5">Load Time</div>
                 </div>
-                <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
-                  <div className={`text-lg font-bold ${p.ttfb_ms > 600 ? "text-orange-600" : "text-green-600"}`}>{fmtMs(p.ttfb_ms)}</div>
-                  <div className="text-[10px] text-gray-500 uppercase">TTFB</div>
+                <div className="bg-gray-100 dark:bg-slate-700/40 rounded-xl px-3 py-2.5 text-center border border-gray-200 dark:border-slate-700/50">
+                  <div className={`text-lg font-bold ${p.ttfb_ms > 600 ? "text-orange-400" : "text-emerald-400"}`}>{fmtMs(p.ttfb_ms)}</div>
+                  <div className="text-[10px] text-gray-500 dark:text-slate-500 uppercase mt-0.5">TTFB</div>
                 </div>
-                <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
-                  <div className={`text-lg font-bold ${p.total_size_bytes > 5*1024*1024 ? "text-red-600" : "text-gray-900"}`}>{fmtBytes(p.total_size_bytes)}</div>
-                  <div className="text-[10px] text-gray-500 uppercase">Page Size</div>
+                <div className="bg-gray-100 dark:bg-slate-700/40 rounded-xl px-3 py-2.5 text-center border border-gray-200 dark:border-slate-700/50">
+                  <div className={`text-lg font-bold ${p.total_size_bytes > 5*1024*1024 ? "text-red-400" : "text-gray-900 dark:text-white"}`}>{fmtBytes(p.total_size_bytes)}</div>
+                  <div className="text-[10px] text-gray-500 dark:text-slate-500 uppercase mt-0.5">Page Size</div>
                 </div>
-                <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
-                  <div className="text-lg font-bold text-gray-900">{p.total_resources}</div>
-                  <div className="text-[10px] text-gray-500 uppercase">Requests</div>
+                <div className="bg-gray-100 dark:bg-slate-700/40 rounded-xl px-3 py-2.5 text-center border border-gray-200 dark:border-slate-700/50">
+                  <div className="text-lg font-bold text-gray-900 dark:text-white">{p.total_resources}</div>
+                  <div className="text-[10px] text-gray-500 dark:text-slate-500 uppercase mt-0.5">Requests</div>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-2 text-xs text-gray-500 mb-3">
+              <div className="grid grid-cols-3 gap-2 text-[10px] text-gray-500 dark:text-slate-500 mb-3 px-1">
                 <div>JS: {p.js_count} files ({fmtBytes(p.js_size_bytes)})</div>
                 <div>CSS: {p.css_count} files ({fmtBytes(p.css_size_bytes)})</div>
                 <div>Images: {p.img_count} ({fmtBytes(p.img_size_bytes)})</div>
               </div>
               {p.issues?.length > 0 && (
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   {p.issues.map((issue, idx) => (
-                    <div key={idx} className="bg-orange-50 border border-orange-100 rounded px-3 py-2 text-sm">
+                    <div key={idx} className="bg-orange-500/5 border border-orange-500/15 rounded-xl px-3 py-2.5 text-sm">
                       <div className="flex items-center gap-2">
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${sevStyle(issue.severity)}`}>{issue.severity}</span>
-                        <span className="font-medium text-gray-800">{issue.label}: {issue.value}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${sevStyle(issue.severity)}`}>{issue.severity}</span>
+                        <span className="font-medium text-gray-800 dark:text-slate-200 text-xs">{issue.label}: {issue.value}</span>
                       </div>
-                      <p className="text-xs text-gray-500 mt-0.5">{issue.recommendation}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{issue.recommendation}</p>
                     </div>
                   ))}
                 </div>
               )}
             </div>
           ))}
-          {items.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No performance data</p>}
+          {items.length === 0 && <p className="text-sm text-gray-400 dark:text-slate-500 text-center py-4">No performance data</p>}
         </div>
       </Collapsible>
     </div>
@@ -788,42 +827,53 @@ const ScoreCard = ({ score, threshold, issues, accCount, testMode }: ScoreCardPr
   // Progress bar width
   const barWidth = score !== null ? Math.min(score, 100) : 0;
 
+  const ringColor = score === null ? "stroke-gray-300 dark:stroke-slate-700" : passed ? "stroke-emerald-500" : "stroke-red-500";
+  const circumference = 2 * Math.PI * 52;
+  const dashOffset = score !== null ? circumference * (1 - score / 100) : circumference;
+
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-6">
-      <div className="flex items-center gap-6">
-        {/* Score circle */}
-        <div className="text-center min-w-[100px]">
-          <div
-            className={`text-5xl font-bold ${
-              score === null
-                ? "text-gray-400"
-                : passed
-                ? "text-green-600"
-                : "text-red-600"
-            }`}
-          >
-            {score !== null ? score : "\u2014"}
+    <div className="bg-white dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700/60 rounded-2xl p-6 backdrop-blur-sm">
+      <div className="flex items-center gap-8">
+        {/* Score ring */}
+        <div className="relative shrink-0 w-32 h-32">
+          <svg className="w-32 h-32 -rotate-90" viewBox="0 0 120 120">
+            <circle cx="60" cy="60" r="52" fill="none" strokeWidth="8" className="stroke-gray-200 dark:stroke-slate-800" />
+            <circle
+              cx="60" cy="60" r="52"
+              fill="none"
+              strokeWidth="8"
+              strokeDasharray={circumference}
+              strokeDashoffset={dashOffset}
+              strokeLinecap="round"
+              className={`transition-all duration-1000 ${ringColor}`}
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className={`text-3xl font-bold leading-none ${
+              score === null ? "text-slate-500" : passed ? "text-emerald-400" : "text-red-400"
+            }`}>
+              {score !== null ? score : "—"}
+            </span>
+            <span className="text-xs text-gray-400 dark:text-slate-600 mt-0.5">/100</span>
           </div>
-          <div className="text-xs text-gray-500 mt-1">/ 100</div>
         </div>
 
         {/* Details */}
-        <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2">
-            <h2 className="text-lg font-semibold text-gray-900">QA Results</h2>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-3 mb-3">
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">QA Results</h2>
             {score !== null && (
-              <span
-                className={`text-xs px-2.5 py-0.5 rounded-full font-semibold ${
-                  passed
-                    ? "bg-green-100 text-green-700"
-                    : "bg-red-100 text-red-700"
-                }`}
-              >
+              <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-semibold border ${
+                passed
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
+                  : "bg-red-500/10 text-red-400 border-red-500/25"
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${passed ? "bg-emerald-400" : "bg-red-400"}`} />
                 {passed ? "QA Passed" : "QA Failed"}
               </span>
             )}
             {testMode === "ai" && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
+              <span className="text-xs px-2.5 py-1 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/25 font-semibold">
                 AI Mode
               </span>
             )}
@@ -831,38 +881,32 @@ const ScoreCard = ({ score, threshold, issues, accCount, testMode }: ScoreCardPr
 
           {/* Progress bar */}
           {score !== null && (
-            <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
+            <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-1.5 mb-4">
               <div
-                className={`h-2 rounded-full transition-all ${
-                  passed ? "bg-green-500" : "bg-red-500"
+                className={`h-1.5 rounded-full transition-all duration-1000 ${
+                  passed
+                    ? "bg-gradient-to-r from-emerald-500 to-teal-500"
+                    : "bg-gradient-to-r from-red-500 to-rose-500"
                 }`}
                 style={{ width: `${barWidth}%` }}
               />
             </div>
           )}
 
-          <div className="flex flex-wrap gap-4 text-sm text-gray-500">
-            <span>
-              Threshold:{" "}
-              <strong className="text-gray-700">{threshold}%</strong>
-            </span>
-            <span>
-              Total Issues:{" "}
-              <strong className="text-gray-700">{issues.length}</strong>
-            </span>
-            <span className="text-red-600">
-              Critical: <strong>{critCount}</strong>
-            </span>
-            <span className="text-orange-600">
-              Major: <strong>{majorCount}</strong>
-            </span>
-            <span className="text-yellow-600">
-              Minor: <strong>{minorCount}</strong>
-            </span>
-            <span>
-              ADA Issues:{" "}
-              <strong className="text-gray-700">{accCount}</strong>
-            </span>
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+            {[
+              { label: "Threshold", value: `${threshold}%`, color: "text-gray-700 dark:text-slate-300" },
+              { label: "Total", value: issues.length, color: "text-gray-700 dark:text-slate-300" },
+              { label: "Critical", value: critCount, color: critCount > 0 ? "text-red-400" : "text-slate-500" },
+              { label: "Major", value: majorCount, color: majorCount > 0 ? "text-orange-400" : "text-slate-500" },
+              { label: "Minor", value: minorCount, color: minorCount > 0 ? "text-yellow-400" : "text-slate-500" },
+              { label: "ADA", value: accCount, color: accCount > 0 ? "text-blue-400" : "text-slate-500" },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="bg-gray-100 dark:bg-slate-700/40 rounded-xl px-3 py-2 text-center border border-gray-200 dark:border-slate-700/50">
+                <p className={`text-base font-bold ${color}`}>{value}</p>
+                <p className="text-[10px] text-gray-500 dark:text-slate-500 uppercase mt-0.5">{label}</p>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -939,15 +983,21 @@ const RunResults = ({ runId }: RunResultsProps) => {
 
   if (runLoading || issuesLoading) {
     return (
-      <div className="text-gray-500 text-sm py-8 text-center">
-        Loading results...
+      <div className="flex flex-col items-center justify-center py-16 gap-4">
+        <div className="w-8 h-8 rounded-full border-2 border-violet-500/30 border-t-violet-500 animate-spin" />
+        <p className="text-gray-500 dark:text-slate-400 text-sm">Loading results...</p>
       </div>
     );
   }
   if (runError || !run) {
     return (
-      <div className="text-red-500 text-sm py-8 text-center">
-        Failed to load run results.
+      <div className="flex flex-col items-center justify-center py-16 gap-3">
+        <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+          <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </div>
+        <p className="text-red-400 text-sm font-medium">Failed to load run results.</p>
       </div>
     );
   }
@@ -1023,10 +1073,10 @@ const RunResults = ({ runId }: RunResultsProps) => {
 
       {/* Custom Run badge — only shown when test_types is set */}
       {run.test_types && (
-        <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-2.5 flex items-center gap-3 text-sm">
-          <span className="font-semibold text-indigo-700">⚙️ Custom Run</span>
-          <span className="text-indigo-500">·</span>
-          <span className="text-indigo-600">
+        <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl px-4 py-2.5 flex items-center gap-3 text-sm">
+          <span className="font-semibold text-indigo-600 dark:text-indigo-300">⚙️ Custom Run</span>
+          <span className="text-indigo-400 dark:text-indigo-700">·</span>
+          <span className="text-indigo-500 dark:text-indigo-400 text-xs">
             Tests selected:{" "}
             {run.test_types
               .split(",")
@@ -1037,42 +1087,40 @@ const RunResults = ({ runId }: RunResultsProps) => {
       )}
 
       {/* Summary bar */}
-      <div className="bg-white border border-gray-200 rounded-lg px-5 py-3 flex items-center justify-between text-sm">
-        <div className="flex items-center gap-4">
-          <span className="text-gray-500">
-            Pages analyzed:{" "}
-            <strong className="text-gray-800">{pageList.length}</strong>
+      <div className="bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700/60 rounded-xl px-5 py-3 flex items-center justify-between backdrop-blur-sm">
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-gray-500 dark:text-slate-500">
+            Pages:{" "}
+            <strong className="text-gray-800 dark:text-slate-200">{pageList.length}</strong>
           </span>
-          <span className="text-gray-300">|</span>
-          <span className="text-gray-500">
-            Total issues:{" "}
-            <strong className="text-gray-800">{issues.length}</strong>
+          <span className="text-gray-300 dark:text-slate-700">|</span>
+          <span className="text-gray-500 dark:text-slate-500">
+            Issues:{" "}
+            <strong className="text-gray-800 dark:text-slate-200">{issues.length}</strong>
+          </span>
+          <span className="text-gray-300 dark:text-slate-700">|</span>
+          <span className="text-xs text-gray-400 dark:text-slate-600">
+            {pagesWithIssues.length} page{pagesWithIssues.length !== 1 ? "s" : ""} affected
           </span>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-400">
-            Showing all {issues.length} issues across {pagesWithIssues.length}{" "}
-            page{pagesWithIssues.length !== 1 ? "s" : ""}
-          </span>
-          {issues.length > 0 && (
-            <button
-              onClick={() => setShowPromptBuilder(true)}
-              className="px-3 py-1.5 text-xs font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors flex items-center gap-1.5"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-              Generate Fix Prompt
-            </button>
-          )}
-        </div>
+        {issues.length > 0 && (
+          <button
+            onClick={() => setShowPromptBuilder(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-violet-600 to-indigo-600 rounded-lg hover:from-violet-700 hover:to-indigo-700 shadow-lg shadow-violet-500/20 transition-all"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            Generate Fix Prompt
+          </button>
+        )}
       </div>
 
       {/* Page-by-page sections */}
       {pagesWithIssues.map((pageName, idx) => (
         <div
           key={pageName}
-          className="border border-gray-200 rounded-lg overflow-hidden"
+          className="border border-gray-200 dark:border-slate-700/60 rounded-2xl overflow-hidden bg-white dark:bg-slate-800/30 backdrop-blur-sm"
         >
           <PageSection
             pageName={pageName}

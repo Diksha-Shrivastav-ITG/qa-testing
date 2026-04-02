@@ -91,26 +91,51 @@ class CaptureEngine:
     def __init__(self, storage_path: str) -> None:
         self.storage_path = storage_path
 
-    async def _wait_for_page_stable(self, page, timeout_s: float = 8) -> None:
-        """Wait for page to load: quick scroll + wait for images. Capped at 8s total."""
+    async def _wait_for_page_stable(self, page, timeout_s: float = 25) -> None:
+        """Full page load + incremental scroll + image wait. Capped at 25s total."""
         try:
             await asyncio.wait_for(self._do_page_stable(page), timeout=timeout_s)
         except (asyncio.TimeoutError, Exception):
             pass
 
     async def _do_page_stable(self, page) -> None:
-        """Quick scroll to trigger lazy loading, then wait for images."""
-        # Fast scroll to bottom and back
-        await page.evaluate("""
-            () => {
-                window.scrollTo(0, document.body.scrollHeight);
-            }
-        """)
-        await asyncio.sleep(0.5)
+        """
+        Simulate a real user visiting the page:
+          1. Wait for network to go quiet so dynamic content is injected.
+          2. Scroll top → bottom in viewport-sized steps so every section
+             enters view and triggers IntersectionObserver / lazy-load.
+          3. Pause at the bottom for final late-loading content.
+          4. Scroll back to the top before the screenshot is taken.
+          5. Wait for all images to finish loading.
+        """
+        # 1. Wait for network idle after initial load
+        try:
+            await page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass  # continue even if it times out
+
+        # 2. Incremental scroll: viewport-height steps from top to bottom
+        page_height = await page.evaluate("document.body.scrollHeight")
+        viewport_height = await page.evaluate("window.innerHeight")
+        step = max(viewport_height, 400)
+        current = 0
+
+        while current < page_height:
+            await page.evaluate(f"window.scrollTo(0, {current})")
+            await asyncio.sleep(0.25)  # let IntersectionObservers and lazy loaders fire
+            current += step
+            # Re-read in case infinite-scroll injected more content
+            page_height = await page.evaluate("document.body.scrollHeight")
+
+        # 3. Pause at the very bottom for any final lazy-loaded content
+        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        await asyncio.sleep(1.0)
+
+        # 4. Return to top so the full-page screenshot begins at y = 0
         await page.evaluate("window.scrollTo(0, 0)")
         await asyncio.sleep(0.5)
 
-        # Wait for images (max 3s)
+        # 5. Wait for all images to finish loading (max 5s)
         await page.evaluate("""
             () => new Promise(resolve => {
                 const images = Array.from(document.images);
@@ -123,7 +148,7 @@ class CaptureEngine:
                     else { img.addEventListener('load', check); img.addEventListener('error', check); }
                 });
                 if (loaded >= total) resolve();
-                setTimeout(resolve, 3000);
+                setTimeout(resolve, 5000);
             })
         """)
 
@@ -237,7 +262,7 @@ class CaptureEngine:
             # Handle password-protected Shopify stores
             if password:
                 try:
-                    await page.goto(f"{base_store}/password", wait_until="domcontentloaded", timeout=30000)
+                    await page.goto(f"{base_store}/password", wait_until="load", timeout=30000)
                     pwd_input = page.locator("input[type='password']")
                     if await pwd_input.is_visible(timeout=3000):
                         await pwd_input.fill(password)
@@ -258,13 +283,14 @@ class CaptureEngine:
                     "path": "/",
                 }])
 
-            # Navigate to the target URL
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            # Navigate to the target URL — wait for full HTML + subresources
+            await page.goto(url, wait_until="load", timeout=60000)
 
             # Inject cleanup CSS to suppress UI noise
             await page.add_style_tag(content=CLEANUP_CSS)
 
-            # Allow dynamic content to settle with smart wait
+            # Scroll the full page (simulating a real user) so lazy-loaded
+            # images, sections, and animations all fire before the screenshot
             await self._wait_for_page_stable(page)
 
             # Full-page screenshot

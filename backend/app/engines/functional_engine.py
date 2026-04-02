@@ -72,8 +72,9 @@ _SMART_FUNCTIONAL_JS = """
         severity: 'minor'
     });
 
-    // 4. CHECK: No broken images
-    const brokenImgs = imgs.filter(img => img.src && img.naturalWidth === 0 && isVisible(img));
+    // 4. CHECK: No broken images (only flag images where complete=true to avoid
+    //    false positives from images that are still loading)
+    const brokenImgs = imgs.filter(img => img.src && img.complete && img.naturalWidth === 0 && isVisible(img));
     results.push({
         name: 'No broken images on the page',
         status: brokenImgs.length === 0 ? 'pass' : 'fail',
@@ -279,7 +280,8 @@ class FunctionalEngine:
             return Array.from(document.querySelectorAll('img')).map(img => ({
                 src: img.src || '',
                 alt: img.alt || '',
-                natural_width: img.naturalWidth
+                natural_width: img.naturalWidth,
+                complete: img.complete
             }));
         }
         """
@@ -291,8 +293,11 @@ class FunctionalEngine:
             src = img.get("src", "")
             alt = img.get("alt", "")
             natural_width = img.get("natural_width", 0)
+            complete = img.get("complete", True)
 
-            # Broken image: no src or naturalWidth == 0 (failed to load)
+            # Broken image: no src or naturalWidth == 0 after the browser has
+            # finished loading it (complete=true). Skipping incomplete images
+            # avoids false positives when the page is still loading resources.
             if not src:
                 failures.append(
                     FunctionalResult(
@@ -302,7 +307,7 @@ class FunctionalEngine:
                         error_message="Image has empty src attribute",
                     )
                 )
-            elif natural_width == 0:
+            elif complete and natural_width == 0:
                 failures.append(
                     FunctionalResult(
                         test_name="check_images",

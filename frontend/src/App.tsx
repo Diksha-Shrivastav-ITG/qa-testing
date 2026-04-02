@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthContext } from "./hooks/useAuth";
+import { ThemeContext } from "./hooks/useTheme";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -22,6 +23,17 @@ function App() {
     () => localStorage.getItem("role")
   );
 
+  const [isDark, setIsDark] = useState<boolean>(
+    () => localStorage.getItem("theme") === "dark"
+  );
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", isDark);
+    localStorage.setItem("theme", isDark ? "dark" : "light");
+  }, [isDark]);
+
+  const toggleTheme = () => setIsDark((v) => !v);
+
   const login = (newToken: string, newRole: string) => {
     localStorage.setItem("token", newToken);
     localStorage.setItem("role", newRole);
@@ -39,29 +51,31 @@ function App() {
   const isAuthenticated = !!token;
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthContext.Provider value={{ token, role, login, logout, isAuthenticated }}>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/signup" element={<SignupPage />} />
-            <Route
-              element={
-                <ProtectedRoute>
-                  <AppLayout />
-                </ProtectedRoute>
-              }
-            >
-              <Route index element={<DashboardPage />} />
-              <Route path="/projects" element={<ProjectsPage />} />
-              <Route path="/projects/:id" element={<ProjectDetailPage />} />
-              <Route path="/runs/:id" element={<RunDetailPage />} />
-              <Route path="/admin/users" element={<UserManagementPage />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </AuthContext.Provider>
-    </QueryClientProvider>
+    <ThemeContext.Provider value={{ isDark, toggleTheme }}>
+      <QueryClientProvider client={queryClient}>
+        <AuthContext.Provider value={{ token, role, login, logout, isAuthenticated }}>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/signup" element={<SignupPage />} />
+              <Route
+                element={
+                  <ProtectedRoute>
+                    <AppLayout />
+                  </ProtectedRoute>
+                }
+              >
+                <Route index element={<DashboardPage />} />
+                <Route path="/projects" element={<ProjectsPage />} />
+                <Route path="/projects/:id" element={<ProjectDetailPage />} />
+                <Route path="/runs/:id" element={<RunDetailPage />} />
+                <Route path="/admin/users" element={<UserManagementPage />} />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </AuthContext.Provider>
+      </QueryClientProvider>
+    </ThemeContext.Provider>
   );
 }
 
