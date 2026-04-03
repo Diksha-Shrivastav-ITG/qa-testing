@@ -173,6 +173,7 @@ async def _run_qa_job_async(
     partial_pages: Optional[list[str]] = None,
     test_mode: str = "design",
     test_types: Optional[list[str]] = None,
+    page_reference_urls: Optional[dict[str, str]] = None,
     *,
     _publish_fn=publish_progress,
 ) -> None:
@@ -229,7 +230,7 @@ async def _run_qa_job_async(
         # ---- Phase 1: Discovery ----
         _publish_fn(run_id, "discovery", progress=_overall_progress(done_phases, "discovery", 0), message="Starting discovery")
 
-        page_mappings: dict[str, str] = project.config.get("page_mappings", {})
+        page_mappings: dict[str, str] = project.config.get("page_mappings", {}) or project.config.get("mappings", {})
 
         has_design_source = (
             project.source_url
@@ -303,6 +304,17 @@ async def _run_qa_job_async(
                 return False
             page_mappings = {k: v for k, v in page_mappings.items() if _page_matches(k, partial_pages)}
 
+            # If a user explicitly requested a path (e.g. "/collections") but discovery
+            # didn't find it (store nav doesn't link to it), add it directly so the page
+            # is always tested. Abstract filters like "__other__", "/", "" are skipped.
+            _abstract_filters = {"__other__", "/", ""}
+            for f in partial_pages:
+                if f in _abstract_filters:
+                    continue
+                already_matched = any(_page_matches(path, [f]) for path in page_mappings)
+                if not already_matched:
+                    page_mappings[f] = f
+
         if not page_mappings:
             run.overall_score = 0.0
             run.status = RunStatus.completed
@@ -317,8 +329,8 @@ async def _run_qa_job_async(
         # ---- Phase 2: Capture ----
         capture_engine = CaptureEngine(storage_path=settings.storage_path)
 
-        # In AI mode or no design source — only capture Shopify
-        skip_design = test_mode == "ai" or not has_design_source
+        # In AI mode, no design source, or QA comparison not requested — only capture Shopify
+        skip_design = test_mode == "ai" or not has_design_source or not _should_run("qa", test_types)
         sources_per_page = 1 if skip_design else 2
         total_captures = len(page_mappings) * len(BREAKPOINTS) * sources_per_page
         captured_count = 0
@@ -333,7 +345,30 @@ async def _run_qa_job_async(
             page_name = shopify_path.strip("/") or "home"
             shopify_url = _build_page_url(project.shopify_url, shopify_path)
 
+            # ---- Determine per-page reference URL and whether to skip design ----
+            _is_homepage = shopify_path in ("/", "")
             if skip_design:
+                # Global AI-only or no design source configured — never do design capture
+                _page_skip_design = True
+                _page_source_url = None
+            elif page_reference_urls is None:
+                # Legacy mode: page_reference_urls not provided → use project.source_url for all pages
+                _page_skip_design = False
+                _page_source_url = (project.source_url or "").rstrip("/") + source_path
+            elif _is_homepage:
+                # Homepage always uses project.source_url (unchanged behaviour)
+                _page_skip_design = False
+                _page_source_url = (project.source_url or "").rstrip("/") + source_path
+            elif shopify_path in page_reference_urls:
+                # Non-homepage with an explicit reference URL provided by the user
+                _page_skip_design = False
+                _page_source_url = page_reference_urls[shopify_path]
+            else:
+                # Non-homepage with no reference URL in the provided dict → AI-only for this page
+                _page_skip_design = True
+                _page_source_url = None
+
+            if _page_skip_design:
                 shopify_results = await capture_engine.capture_page(
                     url=shopify_url,
                     page_name=page_name,
@@ -345,7 +380,6 @@ async def _run_qa_job_async(
                 design_results = []
             else:
                 # Capture Shopify + Design simultaneously
-                source_url = (project.source_url or "").rstrip("/") + source_path
                 shopify_results, design_results = await asyncio.gather(
                     capture_engine.capture_page(
                         url=shopify_url,
@@ -356,7 +390,7 @@ async def _run_qa_job_async(
                         password=project.shopify_password,
                     ),
                     capture_engine.capture_page(
-                        url=source_url,
+                        url=_page_source_url,
                         page_name=page_name,
                         run_dir=run_dir,
                         source="design",
@@ -383,7 +417,7 @@ async def _run_qa_job_async(
 
             shopify_by_bp = {r.breakpoint: r for r in shopify_results if r.status == "success"}
 
-            if skip_design:
+            if _page_skip_design:
                 for bp, sr in shopify_by_bp.items():
                     capture_pairs.append({
                         "page": page_name,
@@ -411,14 +445,28 @@ async def _run_qa_job_async(
                         ))
 
                 design_by_bp = {r.breakpoint: r for r in design_results if r.status == "success"}
+                failed_design_bps = [r.breakpoint for r in design_results if r.status != "success"]
+                if failed_design_bps:
+                    logger.warning("Design capture failed for %s at breakpoints %s — falling back to AI-only", page_name, failed_design_bps)
                 for bp in BREAKPOINTS:
-                    if bp in shopify_by_bp and bp in design_by_bp:
+                    if bp not in shopify_by_bp:
+                        continue
+                    if bp in design_by_bp:
                         capture_pairs.append({
                             "page": page_name,
                             "breakpoint": bp,
                             "shopify_path": shopify_by_bp[bp].image_path,
                             "design_path": design_by_bp[bp].image_path,
                             "mode": "design",
+                        })
+                    else:
+                        # Design capture failed for this breakpoint — fall back to AI-only
+                        capture_pairs.append({
+                            "page": page_name,
+                            "breakpoint": bp,
+                            "shopify_path": shopify_by_bp[bp].image_path,
+                            "design_path": None,
+                            "mode": "ai",
                         })
 
             db.commit()
@@ -441,8 +489,10 @@ async def _run_qa_job_async(
                 "minor": IssueSeverity.minor,
             }
 
-            # Run all breakpoint comparisons concurrently — semaphore caps parallel AI calls
-            _compare_sem = asyncio.Semaphore(6)
+            # Run comparisons with limited concurrency to avoid Groq rate limits.
+            # 2 concurrent AI calls at a time keeps us within free-tier limits even
+            # when testing many pages (each page × 3 breakpoints = many calls).
+            _compare_sem = asyncio.Semaphore(2)
 
             async def _run_single_comparison(pair: dict):
                 async with _compare_sem:
@@ -467,8 +517,15 @@ async def _run_qa_job_async(
                                 breakpoint=pair["breakpoint"],
                             )
                         return pair, result
-                    except Exception:
+                    except Exception as _exc:
+                        logger.warning("Comparison failed for %s @%spx: %s", pair["page"], pair["breakpoint"], _exc)
                         return pair, None
+
+            design_pairs = sum(1 for p in capture_pairs if p["mode"] == "design")
+            ai_pairs = sum(1 for p in capture_pairs if p["mode"] == "ai")
+            logger.info("Compare phase: %d design pairs, %d AI-only pairs for run %d", design_pairs, ai_pairs, run_id)
+            if not capture_pairs:
+                logger.warning("No capture pairs for run %d — skipping comparison", run_id)
 
             _publish_fn(run_id, "compare", progress=_overall_progress(done_phases, "compare", 0), message="Running AI comparisons in parallel")
             raw_compare_results = await asyncio.gather(*[_run_single_comparison(p) for p in capture_pairs])
@@ -481,6 +538,10 @@ async def _run_qa_job_async(
                     msg = f"AI analysis of {pair['page']} @{pair['breakpoint']}px"
                 else:
                     msg = f"Compared {pair['page']} @{pair['breakpoint']}px SSIM={comp_result.ssim_score:.3f}"
+                    if comp_result.ssim_score >= 0.95:
+                        logger.info("SSIM %.3f >= 0.95 for %s @%spx — skipping AI analysis", comp_result.ssim_score, pair["page"], pair["breakpoint"])
+                    elif comp_result.ai_status == "failed":
+                        logger.warning("Groq AI analysis failed for %s @%spx (SSIM=%.3f) — check GROQ_API_KEY and model availability", pair["page"], pair["breakpoint"], comp_result.ssim_score)
 
                 ai_status = AiAnalysisStatus.failed if comp_result.ai_status == "failed" else AiAnalysisStatus.completed
                 db.add(Comparison(
@@ -753,11 +814,18 @@ def run_qa_job(
     partial_pages: Optional[list[str]] = None,
     test_mode: str = "design",
     test_types: Optional[list[str]] = None,
+    page_reference_urls: Optional[dict[str, str]] = None,
 ) -> dict:
     loop = asyncio.new_event_loop()
     try:
         loop.run_until_complete(
-            _run_qa_job_async(run_id, partial_pages, test_mode, test_types=test_types)
+            _run_qa_job_async(
+                run_id,
+                partial_pages,
+                test_mode,
+                test_types=test_types,
+                page_reference_urls=page_reference_urls,
+            )
         )
     finally:
         loop.close()

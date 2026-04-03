@@ -343,3 +343,134 @@ def test_qa_job_handles_groq_failure(mock_sf, mock_cap_cls, mock_comp_cls, mock_
         assert len(issues) == 0
     finally:
         verify_db.close()
+
+
+@patch(_PATCHES["func"])
+@patch(_PATCHES["comp"])
+@patch(_PATCHES["cap"])
+@patch(_PATCHES["sf"])
+def test_per_page_reference_url_is_used_for_non_homepage(
+    mock_sf, mock_cap_cls, mock_comp_cls, mock_func_cls, db
+):
+    """When page_reference_urls contains an entry for a non-homepage path,
+    the design capture uses that URL directly instead of project.source_url + path."""
+    project, run = _seed_project_and_run(
+        db,
+        config={"page_mappings": {"/": "/", "/collections/summer": "/collections/summer"}},
+    )
+    mock_sf.return_value = lambda: _TestSessionLocal()
+
+    captured_urls: list[tuple[str, str]] = []  # (source, url)
+
+    mock_capture = MagicMock()
+
+    async def _fake_capture(url, page_name, run_dir, source, breakpoints, password=None, **kw):
+        captured_urls.append((source, url))
+        return [_make_capture_result(page_name, bp, source) for bp in breakpoints]
+
+    mock_capture.capture_page = AsyncMock(side_effect=_fake_capture)
+    mock_cap_cls.return_value = mock_capture
+
+    mock_comparison = MagicMock()
+
+    async def _compare(design_path, shopify_path, output_dir, page, breakpoint):
+        return _make_comparison_result(page, breakpoint)
+
+    mock_comparison.compare = AsyncMock(side_effect=_compare)
+    mock_comp_cls.return_value = mock_comparison
+
+    mock_functional = MagicMock()
+    mock_functional._create_page = AsyncMock(return_value=AsyncMock())
+    mock_functional.run_surface_tests = AsyncMock(return_value=[])
+    mock_functional.run_shopify_flows = AsyncMock(return_value=[])
+    mock_func_cls.return_value = mock_functional
+
+    noop_publish = MagicMock()
+
+    from app.workers.qa_tasks import _run_qa_job_async
+
+    _run_async(
+        _run_qa_job_async(
+            run.id,
+            _publish_fn=noop_publish,
+            page_reference_urls={
+                "/collections/summer": "https://live-site.com/collections/summer"
+            },
+        )
+    )
+
+    design_urls = [url for source, url in captured_urls if source == "design"]
+    # The reference URL provided must be used directly — NOT project.source_url + path
+    assert any("live-site.com/collections/summer" in url for url in design_urls), (
+        f"Expected live-site.com/collections/summer in design captures, got: {design_urls}"
+    )
+    # project.source_url is https://test.vercel.app — it must NOT appear for collections
+    assert not any(
+        "test.vercel.app/collections" in url for url in design_urls
+    ), f"Wrongly used project.source_url for collections: {design_urls}"
+
+
+@patch(_PATCHES["func"])
+@patch(_PATCHES["comp"])
+@patch(_PATCHES["cap"])
+@patch(_PATCHES["sf"])
+def test_non_homepage_without_reference_url_uses_ai_only(
+    mock_sf, mock_cap_cls, mock_comp_cls, mock_func_cls, db
+):
+    """When a non-homepage path has no entry in page_reference_urls,
+    that page is captured with shopify source only (AI-only mode)."""
+    project, run = _seed_project_and_run(
+        db,
+        config={"page_mappings": {"/": "/", "/collections/summer": "/collections/summer"}},
+    )
+    mock_sf.return_value = lambda: _TestSessionLocal()
+
+    captured_sources_by_page: dict[str, set[str]] = {}
+
+    mock_capture = MagicMock()
+
+    async def _fake_capture(url, page_name, run_dir, source, breakpoints, password=None, **kw):
+        captured_sources_by_page.setdefault(page_name, set()).add(source)
+        return [_make_capture_result(page_name, bp, source) for bp in breakpoints]
+
+    mock_capture.capture_page = AsyncMock(side_effect=_fake_capture)
+    mock_cap_cls.return_value = mock_capture
+
+    mock_comparison = MagicMock()
+
+    async def _compare_ai(shopify_path, output_dir, page, breakpoint):
+        return _make_comparison_result(page, breakpoint, ssim=0.0)
+
+    mock_comparison.compare_ai_only = AsyncMock(side_effect=_compare_ai)
+    mock_comp_cls.return_value = mock_comparison
+
+    mock_functional = MagicMock()
+    mock_functional._create_page = AsyncMock(return_value=AsyncMock())
+    mock_functional.run_surface_tests = AsyncMock(return_value=[])
+    mock_functional.run_shopify_flows = AsyncMock(return_value=[])
+    mock_func_cls.return_value = mock_functional
+
+    noop_publish = MagicMock()
+
+    from app.workers.qa_tasks import _run_qa_job_async
+
+    _run_async(
+        _run_qa_job_async(
+            run.id,
+            _publish_fn=noop_publish,
+            page_reference_urls={},  # empty — no reference URL for /collections/summer
+        )
+    )
+
+    # Homepage ("/") → page_name "home" — should have BOTH shopify and design captures
+    assert "shopify" in captured_sources_by_page.get("home", set())
+    assert "design" in captured_sources_by_page.get("home", set())
+
+    # Collections page → page_name "collections/summer" — shopify only (no reference URL given)
+    collections_page = "collections/summer"
+    assert "shopify" in captured_sources_by_page.get(collections_page, set()), (
+        f"Expected shopify capture for {collections_page}"
+    )
+    assert "design" not in captured_sources_by_page.get(collections_page, set()), (
+        f"Unexpected design capture for {collections_page} — no reference URL was provided"
+    )
