@@ -39,7 +39,12 @@ const TEST_TYPES = [
 ];
 
 interface RunQAModalProps {
-  onConfirm: (pages: string, testMode: "design" | "ai", testTypes?: string[]) => void;
+  onConfirm: (
+    pages: string,
+    testMode: "design" | "ai",
+    testTypes?: string[],
+    pageReferenceUrls?: Record<string, string>
+  ) => void;
   onCancel: () => void;
   isLoading: boolean;
   hasDesignSource?: boolean;
@@ -159,10 +164,44 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, hasDesignSource = false }:
 
   const handleConfirm = () => {
     const pageArg = collectPagePaths(fullQA, pages);
+
+    // Build per-page reference URLs dict.
+    // One reference URL per page category — all paths derived from a category entry
+    // share the same reference URL (V1 design decision).
+    const pageReferenceUrls: Record<string, string> = {};
+    if (!fullQA && testMode === "design") {
+      for (const page of pages) {
+        if (!page.enabled || page.label === "Homepage" || page.pageMode !== "design") continue;
+        const refUrl = page.referenceUrl.trim();
+        if (!refUrl) continue;
+
+        // Extract paths from this page entry's URLs textarea
+        const lines = page.urls.split("\n").map((l) => l.trim()).filter(Boolean);
+        if (lines.length === 0) {
+          // No URLs entered — use category default path
+          const defaultPath =
+            page.label === "Collection Pages" ? "/collections"
+            : page.label === "Product Pages" ? "/products"
+            : null; // "Other Pages" has no single default path — skip
+          if (defaultPath) pageReferenceUrls[defaultPath] = refUrl;
+        } else {
+          for (const line of lines) {
+            let path: string;
+            try {
+              path = new URL(line).pathname;
+            } catch {
+              path = line.startsWith("/") ? line : `/${line}`;
+            }
+            pageReferenceUrls[path] = refUrl;
+          }
+        }
+      }
+    }
+
     if (modalTab === "full") {
-      onConfirm(pageArg, testMode, undefined);
+      onConfirm(pageArg, testMode, undefined, pageReferenceUrls);
     } else {
-      onConfirm(pageArg, testMode, Array.from(selectedTests));
+      onConfirm(pageArg, testMode, Array.from(selectedTests), pageReferenceUrls);
     }
   };
 
