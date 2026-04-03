@@ -6,7 +6,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,12 @@ from app.schemas.pagination import PaginatedResponse
 from app.schemas.qa_run import RunResponse
 from app.services.auth_service import decode_token
 from app.services.run_service import get_next_run_number
+from pydantic import BaseModel as PydanticBaseModel
+
+
+class StartRunBody(PydanticBaseModel):
+    page_reference_urls: dict[str, str] | None = None
+
 
 router = APIRouter(tags=["runs"])
 
@@ -32,12 +38,13 @@ def _dispatch_qa_task(
     partial_pages: Optional[list[str]] = None,
     test_mode: str = "design",
     test_types: Optional[list[str]] = None,
+    page_reference_urls: Optional[dict[str, str]] = None,
 ) -> None:
     """Dispatch the Celery QA task. Silently swallows errors (e.g. no broker)."""
     try:
         from app.workers.qa_tasks import run_qa_job
 
-        run_qa_job.delay(run_id, partial_pages, test_mode, test_types)
+        run_qa_job.delay(run_id, partial_pages, test_mode, test_types, page_reference_urls)
     except Exception:
         pass
 
@@ -75,6 +82,7 @@ def start_run(
     pages: Optional[str] = Query(default=None, description="Comma-separated page slugs"),
     test_mode: str = Query(default="design", description="'design' = compare vs Framer/Figma, 'ai' = AI-only analysis"),
     test_types: Optional[list[str]] = Query(default=None, description="Which test phases to run: qa, functional, ada, seo, performance"),
+    body: StartRunBody = Body(default_factory=StartRunBody),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin", "developer")),
 ) -> RunResponse:
@@ -108,7 +116,7 @@ def start_run(
 
     # Dispatch Celery task to execute the QA run asynchronously
     partial_pages = [p.strip() for p in pages.split(",") if p.strip()] if pages else None
-    _dispatch_qa_task(run.id, partial_pages, test_mode, test_types)
+    _dispatch_qa_task(run.id, partial_pages, test_mode, test_types, body.page_reference_urls)
 
     return run  # type: ignore[return-value]
 
@@ -466,6 +474,41 @@ def get_run_performance(
             "img_count": r.img_count, "img_size_bytes": r.img_size_bytes,
             "dom_nodes": r.dom_nodes,
             "issues": _json.loads(r.issues_json) if r.issues_json else [],
+        }
+        for r in results
+    ]
+
+
+@router.get("/api/runs/{run_id}/comparisons")
+def get_run_comparisons(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list:
+    """Return comparison records for a run — useful for diagnosing visual comparison issues.
+
+    Each record shows the SSIM score and whether Groq AI analysis succeeded.
+    - No records at all → design captures failed (no pairs were built).
+    - ssim_score >= 0.95 → images too similar, Groq was skipped.
+    - ai_analysis_status = 'failed' → Groq API call failed (check GROQ_API_KEY).
+    """
+    from app.models.comparison import Comparison
+    _get_run_or_404(db, run_id)
+    results = (
+        db.query(Comparison)
+        .filter(Comparison.qa_run_id == run_id)
+        .order_by(Comparison.page, Comparison.breakpoint)
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "page": r.page,
+            "breakpoint": r.breakpoint,
+            "ssim_score": r.ssim_score,
+            "ai_analysis_status": r.ai_analysis_status.value if r.ai_analysis_status else None,
+            "has_diff_image": bool(r.diff_image_path),
+            "has_heatmap": bool(r.heatmap_path),
         }
         for r in results
     ]
