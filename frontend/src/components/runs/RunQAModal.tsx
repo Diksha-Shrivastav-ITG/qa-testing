@@ -215,26 +215,82 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, hasDesignSource = false }:
                 <span className="text-sm font-medium text-gray-700 dark:text-slate-300">{page.label}</span>
               </label>
               {!fullQA && page.enabled && (
-                <div className="px-3 pb-3">
-                  <label htmlFor={`urls-${idx}`} className="sr-only">
-                    {page.label} URLs
-                  </label>
-                  <textarea
-                    id={`urls-${idx}`}
-                    value={page.urls}
-                    onChange={(e) => updateUrls(idx, e.target.value)}
-                    rows={2}
-                    placeholder={
-                      page.label === "Homepage"
-                        ? "/ (default — or paste a specific URL)"
-                        : page.label === "Collection Pages"
-                        ? "Paste collection URLs — one per line:\nhttps://store.com/collections/summer"
-                        : page.label === "Product Pages"
-                        ? "Paste product URLs — one per line:\nhttps://store.com/products/boot-1"
-                        : "Paste page URLs:\nhttps://store.com/pages/about"
-                    }
-                    className="w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500"
-                  />
+                <div className="px-3 pb-3 space-y-2">
+                  {/* Existing URLs textarea */}
+                  <div>
+                    <label htmlFor={`urls-${idx}`} className="sr-only">
+                      {page.label} URLs
+                    </label>
+                    <textarea
+                      id={`urls-${idx}`}
+                      value={page.urls}
+                      onChange={(e) => updateUrls(idx, e.target.value)}
+                      rows={2}
+                      placeholder={
+                        page.label === "Homepage"
+                          ? "/ (default — or paste a specific URL)"
+                          : page.label === "Collection Pages"
+                          ? "Paste collection URLs — one per line:\nhttps://store.com/collections/summer"
+                          : page.label === "Product Pages"
+                          ? "Paste product URLs — one per line:\nhttps://store.com/products/boot-1"
+                          : "Paste page URLs:\nhttps://store.com/pages/about"
+                      }
+                      className="w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500"
+                    />
+                  </div>
+
+                  {/* Per-page mode toggle — only for non-homepage pages in design mode */}
+                  {page.label !== "Homepage" && testMode === "design" && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-gray-500 dark:text-slate-400 font-medium">
+                        Comparison mode
+                      </p>
+                      <div className="flex rounded-md overflow-hidden border border-gray-200 dark:border-slate-600">
+                        <button
+                          type="button"
+                          onClick={() => togglePageMode(idx, "design")}
+                          className={`flex-1 py-1.5 text-xs font-medium transition-colors ${
+                            page.pageMode === "design"
+                              ? "bg-indigo-600 text-white"
+                              : "bg-white dark:bg-slate-800 text-gray-500 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-white/5"
+                          }`}
+                        >
+                          Design Comparison
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => togglePageMode(idx, "ai")}
+                          className={`flex-1 py-1.5 text-xs font-medium border-l border-gray-200 dark:border-slate-600 transition-colors ${
+                            page.pageMode === "ai"
+                              ? "bg-indigo-600 text-white"
+                              : "bg-white dark:bg-slate-800 text-gray-500 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-white/5"
+                          }`}
+                        >
+                          AI Only
+                        </button>
+                      </div>
+
+                      {/* Reference URL — required when Design Comparison selected */}
+                      {page.pageMode === "design" && (
+                        <div>
+                          <label
+                            htmlFor={`ref-url-${idx}`}
+                            className="text-xs text-gray-500 dark:text-slate-400 mb-1 block"
+                          >
+                            Reference URL <span className="text-red-500" aria-hidden="true">*</span>
+                          </label>
+                          <input
+                            id={`ref-url-${idx}`}
+                            type="url"
+                            value={page.referenceUrl}
+                            onChange={(e) => updateReferenceUrl(idx, e.target.value)}
+                            placeholder="https://live-site.com/collections/..."
+                            className="w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
