@@ -167,7 +167,24 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, hasDesignSource = false }:
   };
 
   const anyEnabled = fullQA || pages.some((p) => p.enabled);
-  const canStart = !isLoading && anyEnabled && (modalTab === "full" || selectedTests.size > 0);
+
+  // Non-homepage pages in Design Comparison mode that are missing a reference URL
+  const pagesNeedingRef =
+    !fullQA && testMode === "design"
+      ? pages.filter(
+          (p) =>
+            p.enabled &&
+            p.label !== "Homepage" &&
+            p.pageMode === "design" &&
+            !p.referenceUrl.trim()
+        )
+      : [];
+
+  const canStart =
+    !isLoading &&
+    anyEnabled &&
+    (modalTab === "full" || selectedTests.size > 0) &&
+    pagesNeedingRef.length === 0;
 
   /** Shared page selection UI used in both tabs */
   const renderPageSelector = () => (
@@ -490,25 +507,38 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, hasDesignSource = false }:
         </div>
 
         {/* Actions */}
-        <div className="flex gap-3 pt-1">
-          <button
-            onClick={handleConfirm}
-            disabled={!canStart}
-            className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors"
-          >
-            {isLoading
-              ? "Starting..."
-              : modalTab === "customize"
-              ? <><span aria-hidden="true">⚙️</span> Run Selected Tests</>
-              : <><span aria-hidden="true">🚀</span> Start QA Run</>}
-          </button>
-          <button
-            onClick={onCancel}
-            disabled={isLoading}
-            className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-slate-300 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
-          >
-            Cancel
-          </button>
+        <div className="space-y-3">
+          {pagesNeedingRef.length > 0 && (
+            <div
+              role="alert"
+              className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-lg px-3 py-2 text-xs text-red-700 dark:text-red-400"
+            >
+              Design Comparison requires a reference URL for:{" "}
+              <span className="font-semibold">
+                {pagesNeedingRef.map((p) => p.label).join(", ")}
+              </span>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <button
+              onClick={handleConfirm}
+              disabled={!canStart}
+              className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+            >
+              {isLoading
+                ? "Starting..."
+                : modalTab === "customize"
+                ? <><span aria-hidden="true">⚙️</span> Run Selected Tests</>
+                : <><span aria-hidden="true">🚀</span> Start QA Run</>}
+            </button>
+            <button
+              onClick={onCancel}
+              disabled={isLoading}
+              className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-slate-300 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       </div>
     </div>
