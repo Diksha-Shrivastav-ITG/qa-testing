@@ -71,8 +71,17 @@ const ProjectDetailPage = () => {
   });
 
   const runMutation = useMutation({
-    mutationFn: ({ pages, testMode, testTypes }: { pages: string; testMode: "design" | "ai"; testTypes?: string[] }) =>
-      startRun(projectId, pages || undefined, testMode, testTypes),
+    mutationFn: ({
+      pages,
+      testMode,
+      testTypes,
+      pageReferenceUrls,
+    }: {
+      pages: string;
+      testMode: "design" | "ai";
+      testTypes?: string[];
+      pageReferenceUrls?: Record<string, string>;
+    }) => startRun(projectId, pages || undefined, testMode, testTypes, pageReferenceUrls),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["runs", projectId] });
       setShowRunModal(false);
@@ -428,11 +437,12 @@ const ProjectDetailPage = () => {
       {/* Run QA Modal */}
       {showRunModal && (
         <RunQAModal
-          onConfirm={(pages, testMode, testTypes) =>
-            runMutation.mutate({ pages, testMode, testTypes })
+          onConfirm={(pages, testMode, testTypes, pageReferenceUrls) =>
+            runMutation.mutate({ pages, testMode, testTypes, pageReferenceUrls })
           }
           onCancel={() => setShowRunModal(false)}
           isLoading={runMutation.isPending}
+          hasDesignSource={!!project?.source_url?.trim()}
         />
       )}
     </div>
