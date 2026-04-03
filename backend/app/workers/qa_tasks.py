@@ -331,8 +331,17 @@ async def _run_qa_job_async(
 
         # In AI mode, no design source, or QA comparison not requested — only capture Shopify
         skip_design = test_mode == "ai" or not has_design_source or not _should_run("qa", test_types)
-        sources_per_page = 1 if skip_design else 2
-        total_captures = len(page_mappings) * len(BREAKPOINTS) * sources_per_page
+        if skip_design:
+            total_captures = len(page_mappings) * len(BREAKPOINTS)
+        elif page_reference_urls is None:
+            # Legacy mode: all pages use 2 sources (shopify + design)
+            total_captures = len(page_mappings) * len(BREAKPOINTS) * 2
+        else:
+            # Per-page mode: homepage + pages with a reference URL get 2 sources, others get 1
+            total_captures = sum(
+                len(BREAKPOINTS) * (2 if (p in ("/", "") or p in page_reference_urls) else 1)
+                for p in page_mappings
+            )
         captured_count = 0
         capture_pairs: list[dict] = []
 
