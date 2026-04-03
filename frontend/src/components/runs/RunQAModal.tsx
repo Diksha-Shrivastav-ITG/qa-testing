@@ -170,7 +170,7 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, hasDesignSource = false }:
 
   // Non-homepage pages in Design Comparison mode that are missing a reference URL
   const pagesNeedingRef =
-    !fullQA && testMode === "design"
+    !fullQA && testMode === "design" && modalTab === "customize"
       ? pages.filter(
           (p) =>
             p.enabled &&
