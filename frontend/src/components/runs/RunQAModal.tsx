@@ -245,9 +245,14 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, hasDesignSource = false }:
                       <p className="text-xs text-gray-500 dark:text-slate-400 font-medium">
                         Comparison mode
                       </p>
-                      <div className="flex rounded-md overflow-hidden border border-gray-200 dark:border-slate-600">
+                      <div
+                        role="group"
+                        aria-label="Comparison mode"
+                        className="flex rounded-md overflow-hidden border border-gray-200 dark:border-slate-600"
+                      >
                         <button
                           type="button"
+                          aria-pressed={page.pageMode === "design"}
                           onClick={() => togglePageMode(idx, "design")}
                           className={`flex-1 py-1.5 text-xs font-medium transition-colors ${
                             page.pageMode === "design"
@@ -259,6 +264,7 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, hasDesignSource = false }:
                         </button>
                         <button
                           type="button"
+                          aria-pressed={page.pageMode === "ai"}
                           onClick={() => togglePageMode(idx, "ai")}
                           className={`flex-1 py-1.5 text-xs font-medium border-l border-gray-200 dark:border-slate-600 transition-colors ${
                             page.pageMode === "ai"
@@ -282,6 +288,7 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, hasDesignSource = false }:
                           <input
                             id={`ref-url-${idx}`}
                             type="url"
+                            aria-required="true"
                             value={page.referenceUrl}
                             onChange={(e) => updateReferenceUrl(idx, e.target.value)}
                             placeholder="https://live-site.com/collections/..."
