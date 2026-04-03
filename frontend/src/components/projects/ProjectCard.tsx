@@ -4,7 +4,7 @@ interface Project {
   id: number;
   name: string;
   shopify_url: string;
-  source_type: string;
+  source_type?: string;
 }
 
 interface ProjectCardProps {
@@ -33,7 +33,7 @@ const getAvatarColor = (name: string) =>
   AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length];
 
 const ProjectCard = ({ project, onRunQA }: ProjectCardProps) => {
-  const src = getSourceConfig(project.source_type);
+  const src = getSourceConfig(project.source_type ?? "none");
   const avatarColor = getAvatarColor(project.name);
 
   return (

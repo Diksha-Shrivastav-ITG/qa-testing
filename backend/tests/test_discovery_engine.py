@@ -11,9 +11,13 @@ from app.engines.discovery_engine import DiscoveryEngine
 # ---------------------------------------------------------------------------
 
 def _make_mock_page(links: list[dict]) -> AsyncMock:
-    """Return a mock Playwright page whose evaluate() resolves to *links*."""
+    """Return a mock Playwright page whose evaluate() resolves to *links* on the
+    second call (the first call is the scroll JS whose return value is discarded).
+    *links* should be a list of {path, name} dicts as produced by _LINK_JS.
+    """
     page = AsyncMock()
-    page.evaluate = AsyncMock(return_value=links)
+    # First evaluate call = scroll JS (return value ignored); second = _LINK_JS
+    page.evaluate = AsyncMock(side_effect=[None, links])
     return page
 
 
@@ -28,15 +32,15 @@ async def test_discover_shopify_pages():
     engine = DiscoveryEngine()
 
     raw_links = [
-        {"href": "https://example.myshopify.com/", "text": "Home"},
-        {"href": "https://example.myshopify.com/collections/all", "text": "Shop"},
-        {"href": "https://example.myshopify.com/pages/about", "text": "About"},
+        {"path": "/", "name": "Home"},
+        {"path": "/collections/all", "name": "Shop"},
+        {"path": "/pages/about", "name": "About"},
         # These should be filtered out:
-        {"href": "https://example.myshopify.com/cart", "text": "Cart"},
-        {"href": "https://example.myshopify.com/account/login", "text": "Login"},
-        {"href": "https://example.myshopify.com/search", "text": "Search"},
-        {"href": "https://example.myshopify.com/policies/privacy-policy", "text": "Privacy"},
-        {"href": "https://example.myshopify.com/password", "text": "Password"},
+        {"path": "/cart", "name": "Cart"},
+        {"path": "/account/login", "name": "Login"},
+        {"path": "/search", "name": "Search"},
+        {"path": "/policies/privacy-policy", "name": "Privacy"},
+        {"path": "/password", "name": "Password"},
     ]
 
     mock_page = _make_mock_page(raw_links)
@@ -70,7 +74,7 @@ async def test_discover_shopify_pages_with_password():
     engine = DiscoveryEngine()
 
     mock_page = _make_mock_page([
-        {"href": "https://example.myshopify.com/", "text": "Home"},
+        {"path": "/", "name": "Home"},
     ])
 
     with patch.object(engine, "_create_page", new_callable=AsyncMock) as mock_create:
@@ -84,14 +88,14 @@ async def test_discover_shopify_pages_with_password():
 
 
 @pytest.mark.asyncio
-async def test_discover_framer_pages():
-    """discover_framer_pages should return internal links as {path, name} dicts."""
+async def test_discover_source_pages():
+    """discover_source_pages should return internal links as {path, name} dicts for any URL."""
     engine = DiscoveryEngine()
 
     raw_links = [
-        {"href": "https://mysite.framer.app/", "text": "Home"},
-        {"href": "https://mysite.framer.app/about", "text": "About"},
-        {"href": "https://mysite.framer.app/contact", "text": "Contact"},
+        {"path": "/", "name": "Home"},
+        {"path": "/about", "name": "About"},
+        {"path": "/contact", "name": "Contact"},
     ]
 
     mock_page = _make_mock_page(raw_links)
@@ -99,7 +103,7 @@ async def test_discover_framer_pages():
     with patch.object(engine, "_create_page", new_callable=AsyncMock) as mock_create:
         mock_create.return_value = mock_page
 
-        pages = await engine.discover_framer_pages("https://mysite.framer.app")
+        pages = await engine.discover_source_pages("https://mysite.vercel.app")
 
     assert len(pages) == 3
     paths = [p["path"] for p in pages]

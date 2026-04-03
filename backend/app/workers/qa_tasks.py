@@ -246,10 +246,22 @@ async def _run_qa_job_async(
             if test_mode == "ai" or not has_design_source:
                 # AI-only mode or no design source — map Shopify pages to themselves
                 source_pages = shopify_pages
-            elif project.source_type == SourceType.framer:
-                source_pages = await discovery.discover_framer_pages(project.source_url)
+            elif project.source_type in (SourceType.website, SourceType.framer):
+                source_pages = await discovery.discover_source_pages(project.source_url)
+            elif project.source_type == SourceType.figma:
+                # Figma: use API to list frames, then map them as source pages
+                from app.utils.source_detect import extract_figma_file_key
+                from app.engines.figma_capture import FigmaCapture
+
+                file_key = extract_figma_file_key(project.source_url or "")
+                if file_key and project.figma_token:
+                    figma = FigmaCapture(token=project.figma_token, storage_path=settings.storage_path)
+                    frames = await figma.list_frames(file_key)
+                    source_pages = [{"path": f"/{f['name'].lower().replace(' ', '-')}", "name": f["name"]} for f in frames]
+                else:
+                    source_pages = shopify_pages
             else:
-                source_pages = shopify_pages  # Figma handled differently
+                source_pages = shopify_pages
 
             page_mappings = discovery.auto_map(shopify_pages, source_pages)
 
@@ -349,7 +361,6 @@ async def _run_qa_job_async(
                         run_dir=run_dir,
                         source="design",
                         breakpoints=BREAKPOINTS,
-                        password=project.framer_password,
                     ),
                 )
 

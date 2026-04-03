@@ -17,7 +17,7 @@ interface Project {
   id: number;
   name: string;
   shopify_url: string;
-  source_type: string;
+  source_type?: string;
   source_url: string;
 }
 
@@ -349,12 +349,11 @@ const ProjectDetailPage = () => {
             <div className="bg-white dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700/60 rounded-2xl p-6 space-y-5">
               {[
                 { label: "Shopify URL", value: project.shopify_url },
-                { label: "Source Type", value: project.source_type, capitalize: true },
-                { label: "Source URL", value: project.source_url, breakAll: true },
-              ].map(({ label, value, capitalize, breakAll }) => (
+                { label: "Reference URL", value: project.source_url, breakAll: true },
+              ].map(({ label, value, breakAll }) => (
                 <div key={label}>
                   <p className="text-[10px] font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-widest mb-1.5">{label}</p>
-                  <p className={`text-sm text-gray-700 dark:text-slate-200 ${capitalize ? "capitalize" : ""} ${breakAll ? "break-all" : ""}`}>
+                  <p className={`text-sm text-gray-700 dark:text-slate-200 ${breakAll ? "break-all" : ""}`}>
                     {value || <span className="text-gray-300 dark:text-slate-600 italic">Not set</span>}
                   </p>
                 </div>

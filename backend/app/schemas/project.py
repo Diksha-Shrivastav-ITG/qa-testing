@@ -11,10 +11,8 @@ from app.models.project import SourceType
 class ProjectCreate(BaseModel):
     name: str
     shopify_url: str
-    source_type: SourceType = SourceType.none
     source_url: Optional[str] = None
     shopify_password: Optional[str] = None
-    framer_password: Optional[str] = None
     figma_token: Optional[str] = None
     pass_threshold: float = 90.0
 
@@ -24,7 +22,6 @@ class ProjectUpdate(BaseModel):
     shopify_url: Optional[str] = None
     source_url: Optional[str] = None
     shopify_password: Optional[str] = None
-    framer_password: Optional[str] = None
     figma_token: Optional[str] = None
     pass_threshold: Optional[float] = None
 

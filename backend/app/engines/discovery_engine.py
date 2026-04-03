@@ -189,13 +189,13 @@ class DiscoveryEngine:
 
         return results
 
-    async def discover_framer_pages(self, framer_url: str) -> list[dict]:
-        """Discover internal pages of a Framer site.
+    async def discover_source_pages(self, source_url: str) -> list[dict]:
+        """Discover internal pages of any web-based source site.
 
         Same approach as :meth:`discover_pages` but without Shopify-specific
-        path filtering.
+        path filtering. Works for any URL (Vercel, Webflow, Framer, static HTML, etc.).
         """
-        page = await self._create_page(framer_url)
+        page = await self._create_page(source_url)
 
         try:
             await page.evaluate("""

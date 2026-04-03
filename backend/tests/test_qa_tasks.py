@@ -27,7 +27,7 @@ from tests.conftest import _TestSessionLocal, _test_engine
 # Helpers
 # ---------------------------------------------------------------------------
 
-BREAKPOINTS = [375, 425, 768, 1024, 1280, 1440, 1920]
+BREAKPOINTS = [375, 768, 1440]
 
 
 def _make_capture_result(page, bp, source, status="success"):
@@ -81,8 +81,8 @@ def _seed_project_and_run(db, run_number=1, config=None):
     project = Project(
         name="Test Shop",
         shopify_url="https://test.myshopify.com",
-        source_type=SourceType.framer,
-        source_url="https://test.framer.app",
+        source_type=SourceType.website,
+        source_url="https://test.vercel.app",
         created_by=user.id,
         config=config or {"page_mappings": {"/": "/", "/about": "/about"}},
     )
@@ -207,17 +207,17 @@ def test_qa_job_completes_successfully(mock_sf, mock_cap_cls, mock_comp_cls, moc
         assert updated_run.overall_score is not None
         assert updated_run.completed_at is not None
 
-        # 2 pages * 7 breakpoints * 2 sources = 28
+        # 2 pages * 3 breakpoints * 2 sources = 12
         captures = verify_db.query(Capture).filter(Capture.qa_run_id == run.id).all()
-        assert len(captures) == 28
+        assert len(captures) == 12
 
-        # 2 pages * 7 breakpoints = 14
+        # 2 pages * 3 breakpoints = 6
         comparisons = verify_db.query(Comparison).filter(Comparison.qa_run_id == run.id).all()
-        assert len(comparisons) == 14
+        assert len(comparisons) == 6
 
-        # Each comparison has 1 AI issue -> 14 issues
+        # Each comparison has 1 AI issue -> 6 issues
         issues = verify_db.query(Issue).filter(Issue.qa_run_id == run.id).all()
-        assert len(issues) == 14
+        assert len(issues) == 6
 
         # 1 functional test
         func_tests = verify_db.query(FunctionalTest).filter(FunctionalTest.qa_run_id == run.id).all()
@@ -280,10 +280,10 @@ def test_qa_job_handles_capture_failure(mock_sf, mock_cap_cls, mock_comp_cls, mo
         assert len(broken_captures) == 0
 
         home_captures = [c for c in captures if c.page == "home"]
-        assert len(home_captures) == 14
+        assert len(home_captures) == 6
 
         comparisons = verify_db.query(Comparison).filter(Comparison.qa_run_id == run.id).all()
-        assert len(comparisons) == 7
+        assert len(comparisons) == 3
     finally:
         verify_db.close()
 
@@ -334,7 +334,7 @@ def test_qa_job_handles_groq_failure(mock_sf, mock_cap_cls, mock_comp_cls, mock_
         assert updated_run.status == RunStatus.completed
 
         comparisons = verify_db.query(Comparison).filter(Comparison.qa_run_id == run.id).all()
-        assert len(comparisons) == 7
+        assert len(comparisons) == 3
 
         for comp in comparisons:
             assert comp.ai_analysis_status == AiAnalysisStatus.failed

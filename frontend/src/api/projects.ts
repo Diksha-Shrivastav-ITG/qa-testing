@@ -8,7 +8,6 @@ export const getProject = (id: number) => api.get(`/api/projects/${id}`);
 export const createProject = (data: {
   name: string;
   shopify_url: string;
-  source_type: string;
   source_url?: string;
   shopify_password?: string;
   figma_token?: string;

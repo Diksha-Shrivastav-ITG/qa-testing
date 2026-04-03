@@ -8,7 +8,7 @@ interface Project {
   id: number;
   name: string;
   shopify_url: string;
-  source_type: string;
+  source_type?: string;
   pass_threshold?: number;
 }
 
@@ -474,14 +474,14 @@ const DashboardPage = () => {
                     </div>
                     <span
                       className={`shrink-0 ml-2 text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
-                        p.source_type === "none"
+                        !p.source_type || p.source_type === "none"
                           ? "bg-violet-100 border-violet-200 text-violet-700 dark:bg-violet-500/10 dark:border-violet-500/20 dark:text-violet-400"
                           : p.source_type === "figma"
                           ? "bg-emerald-100 border-emerald-200 text-emerald-700 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-400"
                           : "bg-blue-100 border-blue-200 text-blue-700 dark:bg-blue-500/10 dark:border-blue-500/20 dark:text-blue-400"
                       }`}
                     >
-                      {p.source_type === "none" ? "AI" : p.source_type}
+                      {!p.source_type || p.source_type === "none" ? "AI" : p.source_type}
                     </span>
                   </button>
                 ))

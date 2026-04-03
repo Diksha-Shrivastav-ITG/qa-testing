@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 
 class SourceType(str, enum.Enum):
+    website = "website"
     framer = "framer"
     figma = "figma"
     none = "none"
@@ -33,7 +34,6 @@ class Project(Base):
 
     # Nullable encrypted credential fields
     shopify_password: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    framer_password: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     figma_token: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
     config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

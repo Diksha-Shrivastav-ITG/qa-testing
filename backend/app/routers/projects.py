@@ -13,6 +13,7 @@ from app.models.project import Project
 from app.models.user import User
 from app.schemas.pagination import PaginatedResponse
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
+from app.utils.source_detect import detect_source_type
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -35,10 +36,9 @@ def create_project(
     project = Project(
         name=payload.name,
         shopify_url=payload.shopify_url,
-        source_type=payload.source_type,
+        source_type=detect_source_type(payload.source_url),
         source_url=payload.source_url,
         shopify_password=payload.shopify_password,
-        framer_password=payload.framer_password,
         figma_token=payload.figma_token,
         pass_threshold=payload.pass_threshold,
         created_by=current_user.id,
@@ -98,24 +98,14 @@ def update_project(
     for field, value in update_data.items():
         setattr(project, field, value)
 
+    # Re-derive source_type if source_url was updated
+    if "source_url" in update_data:
+        project.source_type = detect_source_type(project.source_url)
+
     db.commit()
     db.refresh(project)
     return project  # type: ignore[return-value]
 
-
-# @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
-# def delete_project(
-#     project_id: int,
-#     db: Session = Depends(get_db),
-#     current_user: User = Depends(get_current_user),
-# ) -> None:
-#     project = db.query(Project).filter(Project.id == project_id).first()
-#     if project is None:
-#         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-#     check_project_owner(project, current_user)
-
-#     db.delete(project)
-#     db.commit()
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_project(
@@ -134,6 +124,7 @@ def delete_project(
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+
 @router.post("/{project_id}/discover")
 def discover_project(
     project_id: int,
@@ -148,6 +139,7 @@ def discover_project(
     check_project_owner(project, current_user)
 
     from app.engines.discovery_engine import DiscoveryEngine
+    from app.models.project import SourceType
 
     engine = DiscoveryEngine()
 
@@ -156,10 +148,10 @@ def discover_project(
             project.shopify_url,
             password=project.shopify_password,
         )
-        if project.source_type.value == "framer":
-            source_pages = await engine.discover_framer_pages(project.source_url)
+        if project.source_type in (SourceType.website, SourceType.framer):
+            source_pages = await engine.discover_source_pages(project.source_url)
         else:
-            # For figma or unknown source types, return empty list — no browser discovery
+            # For figma or none — no browser discovery
             source_pages = []
         return shopify_pages, source_pages
 
@@ -173,7 +165,6 @@ def discover_project(
 
     mappings = engine.auto_map(shopify_pages, source_pages)
 
-    # Persist mappings into project.config
     config: dict[str, Any] = dict(project.config or {})
     config["mappings"] = mappings
     project.config = config
