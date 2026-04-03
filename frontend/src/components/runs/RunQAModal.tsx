@@ -4,20 +4,22 @@ interface PageEntry {
   label: string;
   enabled: boolean;
   urls: string;
+  pageMode: "design" | "ai";
+  referenceUrl: string;
 }
 
 const DEFAULT_PAGES: PageEntry[] = [
-  { label: "Homepage", enabled: true, urls: "/" },
-  { label: "Collection Pages", enabled: false, urls: "" },
-  { label: "Product Pages", enabled: false, urls: "" },
-  { label: "Other Pages", enabled: false, urls: "" },
+  { label: "Homepage", enabled: true, urls: "/", pageMode: "design", referenceUrl: "" },
+  { label: "Collection Pages", enabled: false, urls: "", pageMode: "design", referenceUrl: "" },
+  { label: "Product Pages", enabled: false, urls: "", pageMode: "design", referenceUrl: "" },
+  { label: "Other Pages", enabled: false, urls: "", pageMode: "design", referenceUrl: "" },
 ];
 
 const TEST_MODES = [
   {
     value: "design",
     label: "Design Comparison",
-    desc: "Compare against Framer / Figma reference",
+    desc: "Compare against your reference site for visual differences",
     icon: "🎨",
   },
   {
@@ -40,6 +42,7 @@ interface RunQAModalProps {
   onConfirm: (pages: string, testMode: "design" | "ai", testTypes?: string[]) => void;
   onCancel: () => void;
   isLoading: boolean;
+  hasDesignSource?: boolean;
 }
 
 /** Collect page paths from the pages array (shared logic for both tabs) */
@@ -68,11 +71,11 @@ function collectPagePaths(fullQA: boolean, pages: PageEntry[]): string {
   return allPaths.join(",");
 }
 
-const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
+const RunQAModal = ({ onConfirm, onCancel, isLoading, hasDesignSource = false }: RunQAModalProps) => {
   const [modalTab, setModalTab] = useState<"full" | "customize">("full");
   const [fullQA, setFullQA] = useState(true);
   const [pages, setPages] = useState<PageEntry[]>(DEFAULT_PAGES);
-  const [testMode, setTestMode] = useState<"design" | "ai">("ai");
+  const [testMode, setTestMode] = useState<"design" | "ai">(hasDesignSource ? "design" : "ai");
   // link_audit is included by default and coupled to "qa"
   const [selectedTests, setSelectedTests] = useState<Set<string>>(
     () => new Set([...TEST_TYPES.map((t) => t.key), "link_audit"])
@@ -123,6 +126,14 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
 
   const updateUrls = (idx: number, value: string) => {
     setPages((prev) => prev.map((p, i) => (i === idx ? { ...p, urls: value } : p)));
+  };
+
+  const togglePageMode = (idx: number, mode: "design" | "ai") => {
+    setPages((prev) => prev.map((p, i) => (i === idx ? { ...p, pageMode: mode } : p)));
+  };
+
+  const updateReferenceUrl = (idx: number, value: string) => {
+    setPages((prev) => prev.map((p, i) => (i === idx ? { ...p, referenceUrl: value } : p)));
   };
 
   const handleFullQA = () => {
