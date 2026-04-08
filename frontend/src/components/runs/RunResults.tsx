@@ -435,15 +435,32 @@ const PageSection = ({
               <p className="text-sm font-medium text-emerald-400">No issues on this page</p>
             </div>
           ) : (
-            orderedTypes.map((typeName) => (
-              <TypeSubsection
-                key={typeName}
-                typeName={typeName}
-                issues={byType[typeName]}
-                numberPrefix={`${pageNumber}`}
-                startIdx={typeOffsets[typeName]}
-              />
-            ))
+            <>
+              {/* Show types that have issues */}
+              {orderedTypes.map((typeName) => (
+                <TypeSubsection
+                  key={typeName}
+                  typeName={typeName}
+                  issues={byType[typeName]}
+                  numberPrefix={`${pageNumber}`}
+                  startIdx={typeOffsets[typeName]}
+                />
+              ))}
+              {/* Show "no issues" message for standard types that are absent */}
+              {typeOrder.filter((t) => !orderedTypes.includes(t)).map((typeName) => (
+                <div
+                  key={typeName}
+                  className="bg-gray-50 dark:bg-slate-800/30 rounded-xl border border-gray-200 dark:border-slate-700/40 px-4 py-3 flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-xs font-medium text-emerald-400">
+                    No {typeLabel(typeName).toLowerCase()} issues found
+                  </span>
+                </div>
+              ))}
+            </>
           )}
         </div>
       </div>

@@ -31,6 +31,7 @@ class FunctionalTest(Base):
     step_failed: Mapped[str | None] = mapped_column(String(512), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     screenshot_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    page: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     # Relationship
     qa_run: Mapped[QaRun] = relationship("QaRun", back_populates="functional_tests")

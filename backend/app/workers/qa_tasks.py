@@ -677,7 +677,7 @@ async def _run_qa_job_async(
             done_phases.append("compare")
             _publish_fn(run_id, "compare", progress=_overall_progress(done_phases, "", 0), message="QA test skipped")
 
-        # ---- Phase 4: Functional Tests ----
+        # ---- Phase 4: Functional Tests (all pages) ----
         if _should_run("functional", test_types):
             _publish_fn(run_id, "functional", progress=_overall_progress(done_phases, "functional", 0), message="Running functional tests")
 
@@ -685,40 +685,56 @@ async def _run_qa_job_async(
             func_output_dir = os.path.join(settings.storage_path, run_dir, "functional")
             os.makedirs(func_output_dir, exist_ok=True)
 
-            first_shopify_path = list(page_mappings.keys())[0]
-            func_url = _build_page_url(project.shopify_url, first_shopify_path)
-            first_page_name = first_shopify_path.strip("/") or "home"
+            all_shopify_paths = list(page_mappings.keys())
+            for fp_idx, shopify_path in enumerate(all_shopify_paths):
+                page_name = shopify_path.strip("/") or "home"
+                func_url = _build_page_url(project.shopify_url, shopify_path)
 
-            try:
-                pw_page = await functional_engine._create_page(func_url)
-                surface_results = await functional_engine.run_surface_tests(pw_page, func_output_dir)
-                flow_results = await functional_engine.run_shopify_flows(pw_page, func_output_dir)
+                _publish_fn(run_id, "functional",
+                            progress=_overall_progress(done_phases, "functional", (fp_idx + 1) / max(len(all_shopify_paths), 1)),
+                            message=f"Functional tests: {page_name}")
 
-                for fr in surface_results + flow_results:
-                    status = FunctionalTestStatus.pass_ if fr.status == "pass" else FunctionalTestStatus.fail
-                    db.add(FunctionalTest(
-                        qa_run_id=run_id,
-                        test_name=fr.test_name,
-                        status=status,
-                        severity=fr.severity,
-                        step_failed=str(fr.step_failed) if fr.step_failed is not None else None,
-                        error_message=fr.error_message,
-                        screenshot_path=fr.screenshot_path,
-                    ))
-                    if fr.status == "fail":
-                        db.add(Issue(
+                try:
+                    pw_page = await functional_engine._create_page(func_url)
+                    surface_results = await functional_engine.run_surface_tests(pw_page, func_output_dir)
+                    flow_results = await functional_engine.run_shopify_flows(pw_page, func_output_dir)
+
+                    for fr in surface_results + flow_results:
+                        status = FunctionalTestStatus.pass_ if fr.status == "pass" else FunctionalTestStatus.fail
+                        db.add(FunctionalTest(
                             qa_run_id=run_id,
-                            page=first_page_name,
-                            breakpoint=None,
-                            type=IssueType.functional,
-                            severity=IssueSeverity.major if fr.severity == "major" else IssueSeverity.minor,
-                            description=fr.error_message or f"Functional test '{fr.test_name}' failed",
-                            status=IssueStatus.open,
+                            test_name=fr.test_name,
+                            status=status,
+                            severity=fr.severity,
+                            step_failed=str(fr.step_failed) if fr.step_failed is not None else None,
+                            error_message=fr.error_message,
+                            screenshot_path=fr.screenshot_path,
+                            page=page_name,
                         ))
+                        if fr.status == "fail":
+                            db.add(Issue(
+                                qa_run_id=run_id,
+                                page=page_name,
+                                breakpoint=None,
+                                type=IssueType.functional,
+                                severity=IssueSeverity.major if fr.severity == "major" else IssueSeverity.minor,
+                                description=fr.error_message or f"Functional test '{fr.test_name}' failed",
+                                status=IssueStatus.open,
+                            ))
 
-                db.commit()
-            except Exception:
-                pass
+                    db.commit()
+
+                    # Close the browser to free resources
+                    try:
+                        browser = pw_page.context.browser
+                        await pw_page.close()
+                        if browser:
+                            await browser.close()
+                    except Exception:
+                        pass
+
+                except Exception:
+                    pass
 
             done_phases.append("functional")
             _publish_fn(run_id, "functional", progress=_overall_progress(done_phases, "", 0), message="Functional tests complete")
@@ -743,7 +759,7 @@ async def _run_qa_job_async(
             return None
 
         combined_pages_tested: set[str] = set()
-        for shopify_path in list(page_mappings.keys())[:3]:
+        for shopify_path in list(page_mappings.keys()):
             db.refresh(run)
             if run.status == RunStatus.cancelled:
                 return

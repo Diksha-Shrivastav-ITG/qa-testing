@@ -589,8 +589,8 @@ async def generate_fix_prompt(
                 acc_text += f"\n   WCAG: {a.wcag}"
             acc_text += f"\n   Page: {a.page}"
 
-    # Build the prompt for Groq
-    groq_prompt = f"""You are an expert Shopify theme developer. A QA team has found issues on a Shopify store and needs you to generate a detailed, actionable prompt that another AI developer (Claude Code / VS Code Claude) can use to fix ALL the issues.
+    # Build the prompt for AI
+    groq_prompt = f"""You are an expert Shopify theme developer. A QA team has found issues on a Shopify store. Generate a clear, descriptive prompt that another AI developer (Claude Code) can use to fix ALL the issues.
 
 Store: {body.shopify_url or "Shopify store"}
 Project: {body.project_name or "QA Project"}
@@ -602,14 +602,22 @@ Project: {body.project_name or "QA Project"}
 {acc_text if acc_text else "(none)"}
 
 Generate a comprehensive prompt that:
-1. Lists every issue with the EXACT file to edit (e.g., sections/header.liquid, assets/theme.css)
-2. Provides specific CSS/Liquid/JS code fixes for each issue
-3. Groups fixes by file so the developer can work file-by-file
-4. Includes before/after examples where helpful
-5. Prioritizes critical issues first
-6. Warns about potential side effects of each fix
+1. Describes each issue clearly in plain language — what's wrong and what the expected behavior should be
+2. Groups issues by page (e.g., Homepage, Collection Page, Product Page)
+3. Prioritizes critical issues first, then major, then minor
+4. For each issue, describes WHAT needs to change (e.g., "the hero heading font size should be 38px instead of 38.4px") without inventing file names, class names, CSS selectors, or code snippets
+5. Tells the developer to search the Shopify theme code to find the relevant files and selectors themselves
+6. Mentions the page URL path where the issue occurs
 
-Format the output as a ready-to-paste prompt for Claude Code. Start with a clear instruction line, then list all fixes. Use markdown formatting.
+CRITICAL RULES — you MUST follow these:
+- Do NOT include ANY code snippets (no CSS, HTML, Liquid, or JavaScript)
+- Do NOT invent or guess file names (no "sections/hero.liquid", "assets/theme.css", etc.)
+- Do NOT invent or guess CSS class names or selectors (no ".hero-heading", ".hero-section", etc.)
+- Do NOT include before/after code examples
+- ONLY describe the issues in plain descriptive language and what the correct behavior should be
+- The developer will find the actual files and selectors by searching the theme code themselves
+
+Format the output as a ready-to-paste prompt for Claude Code. Start with a clear instruction line, then list all issues grouped by page. Use markdown formatting.
 
 IMPORTANT: The prompt should be self-contained — the developer should be able to paste it directly into Claude Code and get all issues fixed without needing additional context."""
 
@@ -660,11 +668,12 @@ IMPORTANT: The prompt should be self-contained — the developer should be able 
 
 
 def _fallback_prompt(body: PromptGenerateRequest, issues_text: str, acc_text: str) -> str:
-    """Generate a basic prompt without AI if Groq fails."""
+    """Generate a basic prompt without AI if Bedrock fails."""
     prompt = f"Fix the following QA issues on my Shopify store ({body.shopify_url or 'my store'}):\n"
+    prompt += "\nSearch the theme code to find the relevant files and selectors for each issue. Do NOT guess file names or class names — inspect the actual theme code.\n"
     if issues_text:
         prompt += f"\n## QA Issues\n{issues_text}\n"
     if acc_text:
         prompt += f"\n## Accessibility Issues\n{acc_text}\n"
-    prompt += "\nFor each issue, find the relevant Liquid/CSS/JS file and apply the fix. Explain what you changed and why."
+    prompt += "\nFor each issue, search the Shopify theme to find the actual file and selector, apply the fix, and explain what you changed and why."
     return prompt

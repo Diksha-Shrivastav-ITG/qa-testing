@@ -182,8 +182,8 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
         sub_num = 0
 
         # Visual issues for this page
+        sub_num += 1
         if page_visual:
-            sub_num += 1
             # Group by breakpoint within the page
             by_bp: dict[str | None, list[Issue]] = defaultdict(list)
             for issue in page_visual:
@@ -239,10 +239,16 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
               <h3 class="sub-title"><span class="sec-icon">🎨</span> {section_num}.{sub_num} Visual Design — {len(page_visual)} Issue{"s" if len(page_visual)!=1 else ""}</h3>
               {issue_items_html}
             </div>"""
+        else:
+            sub_html += f"""
+            <div class="subsection">
+              <h3 class="sub-title"><span class="sec-icon">🎨</span> {section_num}.{sub_num} Visual Design</h3>
+              <p style="color:#16a34a;font-size:0.85rem;font-family:-apple-system,sans-serif;padding:0.5rem 0;">✅ No visual design issues found</p>
+            </div>"""
 
         # Functional issues for this page
+        sub_num += 1
         if page_functional:
-            sub_num += 1
             issue_items_html = ""
             for n, issue in enumerate(page_functional, 1):
                 sev = issue.severity.value if hasattr(issue.severity, "value") else str(issue.severity)
@@ -263,6 +269,12 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
             <div class="subsection">
               <h3 class="sub-title"><span class="sec-icon">⚙️</span> {section_num}.{sub_num} Functional — {len(page_functional)} Issue{"s" if len(page_functional)!=1 else ""}</h3>
               {issue_items_html}
+            </div>"""
+        else:
+            sub_html += f"""
+            <div class="subsection">
+              <h3 class="sub-title"><span class="sec-icon">⚙️</span> {section_num}.{sub_num} Functional</h3>
+              <p style="color:#16a34a;font-size:0.85rem;font-family:-apple-system,sans-serif;padding:0.5rem 0;">✅ No functional issues found</p>
             </div>"""
 
         # Content issues for this page
