@@ -158,29 +158,39 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
     sections_html = ""
     section_num = 0
 
-    # ── SECTION: Visual Issues ──
-    if visual_issues:
+    # ── SECTIONS: Issues grouped by PAGE (matching frontend) ──
+    # Group ALL issues by page first, then by type within each page
+    all_issues_by_page: dict[str, list[Issue]] = defaultdict(list)
+    for issue in issues:
+        all_issues_by_page[issue.page or "home"].append(issue)
+
+    # Sort pages: homepage first, then alphabetical
+    page_order = sorted(all_issues_by_page.keys(), key=lambda p: ("" if p in ("home", "/", "") else p))
+
+    for page, page_all_issues in all_issues_by_page.items():
+        if not page_all_issues:
+            continue
         section_num += 1
-        # Group by page
-        by_page: dict[str, list[Issue]] = defaultdict(list)
-        for issue in visual_issues:
-            by_page[issue.page or "home"].append(issue)
+        page_label = _page_label(page)
+
+        # Split by type within this page
+        page_visual = [i for i in page_all_issues if i.type == IssueType.visual]
+        page_functional = [i for i in page_all_issues if i.type == IssueType.functional]
+        page_content = [i for i in page_all_issues if i.type == IssueType.content] if hasattr(IssueType, "content") else []
 
         sub_html = ""
         sub_num = 0
-        for page, page_issues in by_page.items():
-            sub_num += 1
-            page_label = _page_label(page)
 
+        # Visual issues for this page
+        if page_visual:
+            sub_num += 1
             # Group by breakpoint within the page
             by_bp: dict[str | None, list[Issue]] = defaultdict(list)
-            for issue in page_issues:
+            for issue in page_visual:
                 key = str(issue.breakpoint) if issue.breakpoint else "general"
                 by_bp[key].append(issue)
 
             issue_items_html = ""
-            global_issue_n = visual_issues.index(page_issues[0]) + 1
-
             for bp_key, bp_issues in by_bp.items():
                 if bp_key != "general":
                     bp_label = BREAKPOINT_LABELS.get(int(bp_key), f"{bp_key}px")
@@ -204,8 +214,7 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
                         </div>
                         {ssim_badge}"""
 
-                for issue in bp_issues:
-                    n = visual_issues.index(issue) + 1
+                for n_idx, issue in enumerate(bp_issues, 1):
                     sev = issue.severity.value if hasattr(issue.severity, "value") else str(issue.severity)
                     suggestion = issue.ai_suggestion or ""
                     selector = issue.element_selector or ""
@@ -214,7 +223,7 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
                     issue_items_html += f"""
                     <div class="issue-block" style="border-left:4px solid {SEV_COLORS.get(sev,'#999')};background:{SEV_BG.get(sev,'#f9fafb')};">
                       <div class="issue-header-row">
-                        <span class="issue-label">Issue {section_num}.{sub_num}.{n}</span>
+                        <span class="issue-label">Issue {section_num}.{sub_num}.{page_visual.index(issue) + 1}</span>
                         <span class="sev-pill" style="background:{SEV_COLORS.get(sev,'#999')};">{sev.upper()}</span>
                       </div>
                       <p class="issue-title">{title}</p>
@@ -227,30 +236,15 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
 
             sub_html += f"""
             <div class="subsection">
-              <h3 class="sub-title">{section_num}.{sub_num} {page_label} — {len(page_issues)} Issue{"s" if len(page_issues)!=1 else ""}</h3>
+              <h3 class="sub-title"><span class="sec-icon">🎨</span> {section_num}.{sub_num} Visual Design — {len(page_visual)} Issue{"s" if len(page_visual)!=1 else ""}</h3>
               {issue_items_html}
             </div>"""
 
-        sections_html += f"""
-        <div class="section">
-          <h2 class="sec-title"><span class="sec-icon">🎨</span>{section_num}. Visual Design Issues <span class="count-badge">{len(visual_issues)}</span></h2>
-          {sub_html}
-        </div>"""
-
-    # ── SECTION: Functional Issues ──
-    if functional_issues:
-        section_num += 1
-        by_page_f: dict[str, list[Issue]] = defaultdict(list)
-        for issue in functional_issues:
-            by_page_f[issue.page or "home"].append(issue)
-
-        sub_html = ""
-        sub_num = 0
-        for page, page_issues in by_page_f.items():
+        # Functional issues for this page
+        if page_functional:
             sub_num += 1
-            page_label = _page_label(page)
             issue_items_html = ""
-            for n, issue in enumerate(page_issues, 1):
+            for n, issue in enumerate(page_functional, 1):
                 sev = issue.severity.value if hasattr(issue.severity, "value") else str(issue.severity)
                 title = _title_from_description(issue.description)
                 issue_items_html += f"""
@@ -262,18 +256,55 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
                   <p class="issue-title">{title}</p>
                   <ul class="issue-meta">
                     <li><strong>Observation:</strong> {issue.description}</li>
-                    <li><strong>Page:</strong> {page_label}</li>
                     <li><strong>Expected Result:</strong> {issue.ai_suggestion or 'This functionality should work as designed.'}</li>
                   </ul>
                 </div>"""
             sub_html += f"""
             <div class="subsection">
-              <h3 class="sub-title">{section_num}.{sub_num} {page_label}</h3>
+              <h3 class="sub-title"><span class="sec-icon">⚙️</span> {section_num}.{sub_num} Functional — {len(page_functional)} Issue{"s" if len(page_functional)!=1 else ""}</h3>
               {issue_items_html}
             </div>"""
+
+        # Content issues for this page
+        if page_content:
+            sub_num += 1
+            issue_items_html = ""
+            for n, issue in enumerate(page_content, 1):
+                sev = issue.severity.value if hasattr(issue.severity, "value") else str(issue.severity)
+                title = _title_from_description(issue.description)
+                issue_items_html += f"""
+                <div class="issue-block" style="border-left:4px solid {SEV_COLORS.get(sev,'#999')};background:{SEV_BG.get(sev,'#f9fafb')};">
+                  <div class="issue-header-row">
+                    <span class="issue-label">Issue {section_num}.{sub_num}.{n}</span>
+                    <span class="sev-pill" style="background:{SEV_COLORS.get(sev,'#999')};">{sev.upper()}</span>
+                  </div>
+                  <p class="issue-title">{title}</p>
+                  <ul class="issue-meta">
+                    <li><strong>Issue:</strong> {issue.description}</li>
+                    {f'<li><strong>Expected / Fix:</strong> {issue.ai_suggestion}</li>' if issue.ai_suggestion else ''}
+                  </ul>
+                </div>"""
+            sub_html += f"""
+            <div class="subsection">
+              <h3 class="sub-title"><span class="sec-icon">📄</span> {section_num}.{sub_num} Content — {len(page_content)} Issue{"s" if len(page_content)!=1 else ""}</h3>
+              {issue_items_html}
+            </div>"""
+
+        # Count severities for this page
+        page_crit = sum(1 for i in page_all_issues if i.severity == IssueSeverity.critical)
+        page_major = sum(1 for i in page_all_issues if i.severity == IssueSeverity.major)
+        page_minor = sum(1 for i in page_all_issues if i.severity == IssueSeverity.minor)
+        sev_summary = []
+        if page_crit:
+            sev_summary.append(f'<span class="count-badge" style="background:#dc2626;">{page_crit} critical</span>')
+        if page_major:
+            sev_summary.append(f'<span class="count-badge" style="background:#d97706;">{page_major} major</span>')
+        if page_minor:
+            sev_summary.append(f'<span class="count-badge" style="background:#ca8a04;">{page_minor} minor</span>')
+
         sections_html += f"""
         <div class="section">
-          <h2 class="sec-title"><span class="sec-icon">⚙️</span>{section_num}. Functional Issues <span class="count-badge">{len(functional_issues)}</span></h2>
+          <h2 class="sec-title">{section_num}. {page_label} <span class="count-badge">{len(page_all_issues)} issue{"s" if len(page_all_issues)!=1 else ""}</span> {" ".join(sev_summary)}</h2>
           {sub_html}
         </div>"""
 

@@ -36,6 +36,22 @@ interface RunQAModalProps {
   sourceType: string;
 }
 
+/** Parse a URL string (which may contain multiple lines) into path(s) */
+function parseUrls(url: string): string[] {
+  const paths: string[] = [];
+  // Split by newlines to handle textarea multi-line input
+  const lines = url.split(/\n/).map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    try {
+      const parsed = new URL(line);
+      paths.push(parsed.pathname);
+    } catch {
+      paths.push(line.startsWith("/") ? line : `/${line}`);
+    }
+  }
+  return paths;
+}
+
 /** Collect page paths from the pages array (used for Full QA tab) */
 function collectPagePaths(fullQA: boolean, pages: PageEntry[]): string {
   if (fullQA) return "";
@@ -49,12 +65,7 @@ function collectPagePaths(fullQA: boolean, pages: PageEntry[]): string {
       else if (page.label === "Product Pages") allPaths.push("/products");
       else allPaths.push("__other__");
     } else {
-      try {
-        const parsed = new URL(url);
-        allPaths.push(parsed.pathname);
-      } catch {
-        allPaths.push(url.startsWith("/") ? url : `/${url}`);
-      }
+      allPaths.push(...parseUrls(url));
     }
   }
   return allPaths.join(",");
@@ -156,15 +167,33 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, sourceType }: RunQAModalPr
       const pageArg = collectPagePaths(fullQA, pages);
       onConfirm(undefined, projectTestMode, undefined, pageArg);
     } else {
-      // Customize: build per-page configs
-      const configs: PageConfig[] = pages
-        .filter((p) => p.enabled)
-        .map((p) => ({
-          label: p.label,
-          mode: isAIProject ? "ai" as const : p.mode,
-          shopifyUrl: p.shopifyUrl || (p.label === "Homepage" ? "/" : ""),
-          referenceUrl: !isAIProject && p.mode === "design" ? p.referenceUrl : undefined,
-        }));
+      // Customize: build per-page configs — expand multi-line URLs into separate configs
+      const configs: PageConfig[] = [];
+      for (const p of pages) {
+        if (!p.enabled) continue;
+        const mode = isAIProject ? "ai" as const : p.mode;
+        const rawUrl = p.shopifyUrl.trim();
+        // For Homepage or single-line URLs, create one config
+        if (p.label === "Homepage" || !rawUrl.includes("\n")) {
+          configs.push({
+            label: p.label,
+            mode,
+            shopifyUrl: rawUrl || (p.label === "Homepage" ? "/" : ""),
+            referenceUrl: !isAIProject && p.mode === "design" ? p.referenceUrl : undefined,
+          });
+        } else {
+          // Multi-line: create one config per URL
+          const urls = rawUrl.split(/\n/).map((l) => l.trim()).filter(Boolean);
+          for (const url of urls) {
+            configs.push({
+              label: p.label,
+              mode,
+              shopifyUrl: url,
+              referenceUrl: !isAIProject && p.mode === "design" ? p.referenceUrl : undefined,
+            });
+          }
+        }
+      }
       onConfirm(configs, projectTestMode, Array.from(selectedTests));
     }
   };
@@ -256,24 +285,33 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, sourceType }: RunQAModalPr
                   {/* Shopify URL input */}
                   <div>
                     <label htmlFor={`shopify-url-${idx}`} className="text-xs font-medium text-gray-500 dark:text-slate-400">
-                      Shopify URL
+                      Shopify URL{page.label !== "Homepage" ? "s (one per line)" : ""}
                     </label>
-                    <input
-                      id={`shopify-url-${idx}`}
-                      type="url"
-                      value={page.shopifyUrl}
-                      onChange={(e) => updatePageField(idx, "shopifyUrl", e.target.value)}
-                      placeholder={
-                        page.label === "Homepage"
-                          ? "/ (default)"
-                          : page.label === "Collection Pages"
-                          ? "https://store.com/collections/summer"
-                          : page.label === "Product Pages"
-                          ? "https://store.com/products/boot-1"
-                          : "https://store.com/pages/about"
-                      }
-                      className="mt-1 w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500"
-                    />
+                    {page.label === "Homepage" ? (
+                      <input
+                        id={`shopify-url-${idx}`}
+                        type="url"
+                        value={page.shopifyUrl}
+                        onChange={(e) => updatePageField(idx, "shopifyUrl", e.target.value)}
+                        placeholder="/ (default)"
+                        className="mt-1 w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500"
+                      />
+                    ) : (
+                      <textarea
+                        id={`shopify-url-${idx}`}
+                        value={page.shopifyUrl}
+                        onChange={(e) => updatePageField(idx, "shopifyUrl", e.target.value)}
+                        placeholder={
+                          page.label === "Collection Pages"
+                            ? "https://store.com/collections/summer\nhttps://store.com/collections/winter"
+                            : page.label === "Product Pages"
+                            ? "https://store.com/products/boot-1\nhttps://store.com/products/sneaker-2"
+                            : "https://store.com/pages/about\nhttps://store.com/pages/contact"
+                        }
+                        rows={3}
+                        className="mt-1 w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500 resize-y"
+                      />
+                    )}
                   </div>
 
                   {/* Reference URL input — only for Design Comparison mode, hidden for AI projects */}
@@ -359,7 +397,7 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, sourceType }: RunQAModalPr
           hidden={modalTab !== "full"}
           className="space-y-4"
         >
-          {renderPageSelector(false)}
+          {renderPageSelector(true)}
           <div className="bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-lg px-3 py-2 text-xs text-blue-700 dark:text-blue-400">
             <strong>Always included:</strong> ADA compliance, link &amp; button audit, functional tests.
             QA runs in background — you can navigate away safely.

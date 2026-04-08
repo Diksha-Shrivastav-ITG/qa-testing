@@ -1067,10 +1067,8 @@ const RunResults = ({ runId }: RunResultsProps) => {
     return a.localeCompare(b);
   });
 
-  // Only show pages that have issues
-  const pagesWithIssues = pageList.filter(
-    (p) => issuesByPage[p]?.length > 0
-  );
+  // Show all tested pages (not just those with issues)
+  const pagesWithIssues = pageList;
 
   // Determine which sections were actually run
   // test_types is null → Full QA → show everything
@@ -1138,7 +1136,7 @@ const RunResults = ({ runId }: RunResultsProps) => {
           </span>
           <span className="text-gray-300 dark:text-slate-700">|</span>
           <span className="text-xs text-gray-400 dark:text-slate-600">
-            {pagesWithIssues.length} page{pagesWithIssues.length !== 1 ? "s" : ""} affected
+            {pageList.filter((p) => (issuesByPage[p]?.length ?? 0) > 0).length} page{pageList.filter((p) => (issuesByPage[p]?.length ?? 0) > 0).length !== 1 ? "s" : ""} affected
           </span>
         </div>
         {issues.length > 0 && (
