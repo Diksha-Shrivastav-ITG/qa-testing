@@ -448,6 +448,19 @@ async def _run_qa_job_async(
                     return False
                 page_mappings = {k: v for k, v in page_mappings.items() if _page_matches(k, partial_pages)}
 
+                # Add any specific user-provided paths that weren't found by discovery.
+                # Category filters (/, /collections, /products, __other__) only filter
+                # discovered pages, but explicit paths like /collections/summer should
+                # always be tested even if they weren't linked from the homepage.
+                _CATEGORY_FILTERS = ("/", "", "/collections", "/products", "__other__")
+                for pp in partial_pages:
+                    if pp in _CATEGORY_FILTERS:
+                        continue
+                    # Normalize: ensure leading slash
+                    norm = pp if pp.startswith("/") else f"/{pp}"
+                    if norm not in page_mappings:
+                        page_mappings[norm] = norm
+
             if not page_mappings:
                 run.overall_score = 0.0
                 run.status = RunStatus.completed
