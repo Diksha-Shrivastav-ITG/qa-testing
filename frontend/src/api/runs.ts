@@ -1,14 +1,37 @@
 import api from "./client";
 
+export interface PageConfig {
+  label: string;
+  mode: "ai" | "design";
+  shopifyUrl: string;
+  referenceUrl?: string;
+}
+
 export const startRun = (
   projectId: number,
+  pageConfigs?: PageConfig[],
+  testMode?: "design" | "ai",
+  testTypes?: string[],
+  /** Legacy: comma-separated page paths for Full QA */
   pages?: string,
-  testMode: "design" | "ai" = "design",
-  testTypes?: string[]
 ) => {
+  // Customize tab: send JSON body with page_configs
+  if (pageConfigs && pageConfigs.length > 0) {
+    return api.post(`/api/projects/${projectId}/runs`, {
+      page_configs: pageConfigs.map((pc) => ({
+        label: pc.label,
+        mode: pc.mode,
+        shopify_url: pc.shopifyUrl,
+        reference_url: pc.referenceUrl || null,
+      })),
+      test_types: testTypes,
+    });
+  }
+
+  // Full QA tab: use query params (backward compatible)
   const params = new URLSearchParams();
   if (pages) params.set("pages", pages);
-  if (testMode !== "design") params.set("test_mode", testMode);
+  if (testMode && testMode !== "ai") params.set("test_mode", testMode);
   if (testTypes && testTypes.length > 0) {
     testTypes.forEach((t) => params.append("test_types", t));
   }
@@ -38,3 +61,6 @@ export const getSeo = (runId: number) =>
 
 export const getPerformance = (runId: number) =>
   api.get(`/api/runs/${runId}/performance`);
+
+export const getComparisons = (runId: number) =>
+  api.get(`/api/runs/${runId}/comparisons`);

@@ -174,6 +174,7 @@ async def _run_qa_job_async(
     test_mode: str = "design",
     test_types: Optional[list[str]] = None,
     *,
+    page_configs: Optional[list[dict]] = None,
     _publish_fn=publish_progress,
 ) -> None:
     """Execute the full QA pipeline.
@@ -226,198 +227,360 @@ async def _run_qa_job_async(
         run_dir = f"run_{run_id}"
         done_phases: list[str] = []
 
-        # ---- Phase 1: Discovery ----
-        _publish_fn(run_id, "discovery", progress=_overall_progress(done_phases, "discovery", 0), message="Starting discovery")
+        # ================================================================
+        # CUSTOM PAGE CONFIGS MODE — skip discovery, build from user input
+        # ================================================================
+        if page_configs:
+            done_phases.append("discovery")
+            _publish_fn(run_id, "discovery", progress=_overall_progress(done_phases, "", 0),
+                        message="Using user-provided page configs (discovery skipped)")
 
-        page_mappings: dict[str, str] = project.config.get("page_mappings", {})
+            # ---- Capture from page configs ----
+            capture_engine = CaptureEngine(storage_path=settings.storage_path)
+            capture_pairs: list[dict] = []
+            total_captures = 0
 
-        has_design_source = (
-            project.source_url
-            and project.source_url.strip()
-            and project.source_type != SourceType.none
-        )
+            # Count total captures for progress
+            for pc in page_configs:
+                captures_for_page = len(BREAKPOINTS)  # shopify
+                if pc.get("mode") == "design" and pc.get("reference_url"):
+                    captures_for_page += len(BREAKPOINTS)  # reference
+                total_captures += captures_for_page
 
-        if not page_mappings:
-            discovery = DiscoveryEngine()
-            shopify_pages = await discovery.discover_pages(
-                project.shopify_url, password=project.shopify_password
+            captured_count = 0
+
+            for pc in page_configs:
+                db.refresh(run)
+                if run.status == RunStatus.cancelled:
+                    _publish_fn(run_id, "cancelled", progress=0.0, message="Run cancelled")
+                    return
+
+                shopify_url_raw = pc["shopify_url"]
+                # Build full URL if user provided a path
+                if shopify_url_raw.startswith("/"):
+                    shopify_url_full = _build_page_url(project.shopify_url, shopify_url_raw)
+                elif not shopify_url_raw.startswith("http"):
+                    shopify_url_full = _build_page_url(project.shopify_url, f"/{shopify_url_raw}")
+                else:
+                    shopify_url_full = shopify_url_raw
+
+                # Derive page name from URL path
+                from urllib.parse import urlparse as _urlparse
+                _parsed_shopify = _urlparse(shopify_url_full)
+                page_name = _parsed_shopify.path.strip("/") or "home"
+
+                pc_mode = pc.get("mode", "ai")
+                reference_url = pc.get("reference_url", "")
+
+                if pc_mode == "design" and reference_url and reference_url.strip():
+                    # Capture both Shopify + reference URL
+                    shopify_results, design_results = await asyncio.gather(
+                        capture_engine.capture_page(
+                            url=shopify_url_full,
+                            page_name=page_name,
+                            run_dir=run_dir,
+                            source="shopify",
+                            breakpoints=BREAKPOINTS,
+                            password=project.shopify_password,
+                        ),
+                        capture_engine.capture_page(
+                            url=reference_url.strip(),
+                            page_name=page_name,
+                            run_dir=run_dir,
+                            source="design",
+                            breakpoints=BREAKPOINTS,
+                        ),
+                    )
+                else:
+                    # AI-only: capture Shopify only
+                    shopify_results = await capture_engine.capture_page(
+                        url=shopify_url_full,
+                        page_name=page_name,
+                        run_dir=run_dir,
+                        source="shopify",
+                        breakpoints=BREAKPOINTS,
+                        password=project.shopify_password,
+                    )
+                    design_results = []
+
+                # Save shopify captures to DB
+                for cr in shopify_results:
+                    captured_count += 1
+                    _publish_fn(
+                        run_id, "capture", page=page_name,
+                        breakpoint_val=cr.breakpoint,
+                        progress=_overall_progress(done_phases, "capture", captured_count / max(total_captures, 1)),
+                        message=f"Captured shopify {page_name} @{cr.breakpoint}px",
+                    )
+                    if cr.status == "success":
+                        db.add(Capture(
+                            qa_run_id=run_id,
+                            source=CaptureSource.shopify,
+                            page=page_name,
+                            breakpoint=cr.breakpoint,
+                            image_path=cr.image_path,
+                        ))
+
+                shopify_by_bp = {r.breakpoint: r for r in shopify_results if r.status == "success"}
+
+                if pc_mode == "design" and design_results:
+                    # Save design captures to DB
+                    for dr in design_results:
+                        captured_count += 1
+                        _publish_fn(
+                            run_id, "capture", page=page_name,
+                            breakpoint_val=dr.breakpoint,
+                            progress=_overall_progress(done_phases, "capture", captured_count / max(total_captures, 1)),
+                            message=f"Captured reference {page_name} @{dr.breakpoint}px",
+                        )
+                        if dr.status == "success":
+                            db.add(Capture(
+                                qa_run_id=run_id,
+                                source=CaptureSource.design,
+                                page=page_name,
+                                breakpoint=dr.breakpoint,
+                                image_path=dr.image_path,
+                            ))
+
+                    design_by_bp = {r.breakpoint: r for r in design_results if r.status == "success"}
+                    for bp in BREAKPOINTS:
+                        if bp in shopify_by_bp and bp in design_by_bp:
+                            capture_pairs.append({
+                                "page": page_name,
+                                "breakpoint": bp,
+                                "shopify_path": shopify_by_bp[bp].image_path,
+                                "design_path": design_by_bp[bp].image_path,
+                                "mode": "design",
+                                "design_css": design_by_bp[bp].css_data,
+                                "shopify_css": shopify_by_bp[bp].css_data,
+                            })
+                else:
+                    for bp, sr in shopify_by_bp.items():
+                        capture_pairs.append({
+                            "page": page_name,
+                            "breakpoint": bp,
+                            "shopify_path": sr.image_path,
+                            "design_path": None,
+                            "mode": "ai",
+                        })
+
+                db.commit()
+
+            done_phases.append("capture")
+
+            # Build page_mappings for later phases (functional, ada, seo, etc.)
+            from urllib.parse import urlparse as _urlparse2
+            page_mappings = {}
+            for pc in page_configs:
+                surl = pc["shopify_url"]
+                if surl.startswith("/"):
+                    path = surl
+                elif surl.startswith("http"):
+                    _p = _urlparse2(surl)
+                    path = _p.path
+                else:
+                    path = f"/{surl}"
+                page_mappings[path] = path
+
+        else:
+            # ---- Phase 1: Discovery ----
+            _publish_fn(run_id, "discovery", progress=_overall_progress(done_phases, "discovery", 0), message="Starting discovery")
+
+            page_mappings: dict[str, str] = project.config.get("page_mappings", {})
+
+            has_design_source = (
+                project.source_url
+                and project.source_url.strip()
+                and project.source_type != SourceType.none
             )
 
-            if test_mode == "ai" or not has_design_source:
-                # AI-only mode or no design source — map Shopify pages to themselves
-                source_pages = shopify_pages
-            elif project.source_type == SourceType.framer:
-                source_pages = await discovery.discover_framer_pages(project.source_url)
-            else:
-                source_pages = shopify_pages  # Figma handled differently
+            if not page_mappings:
+                discovery = DiscoveryEngine()
+                shopify_pages = await discovery.discover_pages(
+                    project.shopify_url, password=project.shopify_password
+                )
 
-            page_mappings = discovery.auto_map(shopify_pages, source_pages)
+                if test_mode == "ai" or not has_design_source:
+                    # AI-only mode or no design source — map Shopify pages to themselves
+                    source_pages = shopify_pages
+                elif project.source_type == SourceType.framer:
+                    source_pages = await discovery.discover_framer_pages(project.source_url)
+                else:
+                    source_pages = shopify_pages  # Figma handled differently
 
-        # Filter to partial pages if specified
-        if partial_pages:
-            # Known top-level prefixes for "other" filter
-            _KNOWN_PREFIXES = ("/collections", "/products")
+                page_mappings = discovery.auto_map(shopify_pages, source_pages)
 
-            def _page_matches(path: str, filters: list[str]) -> bool:
-                for f in filters:
-                    if f in ("/", ""):
-                        # Homepage only
-                        if path == "/" or path == "":
-                            return True
-                        continue
-                    if f == "__other__":
-                        # Pages that are NOT home, collections, or products
-                        if path in ("/", ""):
+            # Filter to partial pages if specified
+            if partial_pages:
+                # Known top-level prefixes for "other" filter
+                _KNOWN_PREFIXES = ("/collections", "/products")
+
+                def _page_matches(path: str, filters: list[str]) -> bool:
+                    for f in filters:
+                        if f in ("/", ""):
+                            # Homepage only
+                            if path == "/" or path == "":
+                                return True
                             continue
-                        if any(path == pfx or path.startswith(pfx + "/") for pfx in _KNOWN_PREFIXES):
+                        if f == "__other__":
+                            # Pages that are NOT home, collections, or products
+                            if path in ("/", ""):
+                                continue
+                            if any(path == pfx or path.startswith(pfx + "/") for pfx in _KNOWN_PREFIXES):
+                                continue
+                            return True
+                        if f == "/collections":
+                            # Match collection pages: /collections, /collections/all, /collections/summer etc.
+                            if path == "/collections" or path.startswith("/collections/") or path == "/collections":
+                                return True
                             continue
-                        return True
-                    if f == "/collections":
-                        # Match collection pages: /collections, /collections/all, /collections/summer etc.
-                        if path == "/collections" or path.startswith("/collections/") or path == "/collections":
+                        if f == "/products":
+                            # Product pages — /products or any /products/...
+                            if path == f or path.startswith(f + "/") or path == f.rstrip("/"):
+                                return True
+                            continue
+                        # Generic exact or prefix match
+                        if path == f:
                             return True
-                        continue
-                    if f == "/products":
-                        # Product pages — /products or any /products/...
-                        if path == f or path.startswith(f + "/") or path == f.rstrip("/"):
+                        prefix = f.rstrip("/")
+                        if path.startswith(prefix + "/") or path == prefix:
                             return True
-                        continue
-                    # Generic exact or prefix match
-                    if path == f:
-                        return True
-                    prefix = f.rstrip("/")
-                    if path.startswith(prefix + "/") or path == prefix:
-                        return True
-                return False
-            page_mappings = {k: v for k, v in page_mappings.items() if _page_matches(k, partial_pages)}
+                    return False
+                page_mappings = {k: v for k, v in page_mappings.items() if _page_matches(k, partial_pages)}
 
-        if not page_mappings:
-            run.overall_score = 0.0
-            run.status = RunStatus.completed
-            run.completed_at = datetime.now(timezone.utc).isoformat()
-            db.commit()
-            _publish_fn(run_id, "completed", progress=1.0, message="No pages to test")
-            return
-
-        done_phases.append("discovery")
-        _publish_fn(run_id, "discovery", progress=_overall_progress(done_phases, "", 0), message=f"Discovered {len(page_mappings)} pages")
-
-        # ---- Phase 2: Capture ----
-        capture_engine = CaptureEngine(storage_path=settings.storage_path)
-
-        # In AI mode or no design source — only capture Shopify
-        skip_design = test_mode == "ai" or not has_design_source
-        sources_per_page = 1 if skip_design else 2
-        total_captures = len(page_mappings) * len(BREAKPOINTS) * sources_per_page
-        captured_count = 0
-        capture_pairs: list[dict] = []
-
-        for shopify_path, source_path in page_mappings.items():
-            db.refresh(run)
-            if run.status == RunStatus.cancelled:
-                _publish_fn(run_id, "cancelled", progress=0.0, message="Run cancelled")
+            if not page_mappings:
+                run.overall_score = 0.0
+                run.status = RunStatus.completed
+                run.completed_at = datetime.now(timezone.utc).isoformat()
+                db.commit()
+                _publish_fn(run_id, "completed", progress=1.0, message="No pages to test")
                 return
 
-            page_name = shopify_path.strip("/") or "home"
-            shopify_url = _build_page_url(project.shopify_url, shopify_path)
+            done_phases.append("discovery")
+            _publish_fn(run_id, "discovery", progress=_overall_progress(done_phases, "", 0), message=f"Discovered {len(page_mappings)} pages")
 
-            if skip_design:
-                shopify_results = await capture_engine.capture_page(
-                    url=shopify_url,
-                    page_name=page_name,
-                    run_dir=run_dir,
-                    source="shopify",
-                    breakpoints=BREAKPOINTS,
-                    password=project.shopify_password,
-                )
-                design_results = []
-            else:
-                # Capture Shopify + Design simultaneously
-                source_url = (project.source_url or "").rstrip("/") + source_path
-                shopify_results, design_results = await asyncio.gather(
-                    capture_engine.capture_page(
+            # ---- Phase 2: Capture ----
+            capture_engine = CaptureEngine(storage_path=settings.storage_path)
+
+            # In AI mode or no design source — only capture Shopify
+            skip_design = test_mode == "ai" or not has_design_source
+            sources_per_page = 1 if skip_design else 2
+            total_captures = len(page_mappings) * len(BREAKPOINTS) * sources_per_page
+            captured_count = 0
+            capture_pairs: list[dict] = []
+
+            for shopify_path, source_path in page_mappings.items():
+                db.refresh(run)
+                if run.status == RunStatus.cancelled:
+                    _publish_fn(run_id, "cancelled", progress=0.0, message="Run cancelled")
+                    return
+
+                page_name = shopify_path.strip("/") or "home"
+                shopify_url = _build_page_url(project.shopify_url, shopify_path)
+
+                if skip_design:
+                    shopify_results = await capture_engine.capture_page(
                         url=shopify_url,
                         page_name=page_name,
                         run_dir=run_dir,
                         source="shopify",
                         breakpoints=BREAKPOINTS,
                         password=project.shopify_password,
-                    ),
-                    capture_engine.capture_page(
-                        url=source_url,
-                        page_name=page_name,
-                        run_dir=run_dir,
-                        source="design",
-                        breakpoints=BREAKPOINTS,
-                        password=project.framer_password,
-                    ),
-                )
+                    )
+                    design_results = []
+                else:
+                    # Capture Shopify + Design simultaneously
+                    source_url = (project.source_url or "").rstrip("/") + source_path
+                    shopify_results, design_results = await asyncio.gather(
+                        capture_engine.capture_page(
+                            url=shopify_url,
+                            page_name=page_name,
+                            run_dir=run_dir,
+                            source="shopify",
+                            breakpoints=BREAKPOINTS,
+                            password=project.shopify_password,
+                        ),
+                        capture_engine.capture_page(
+                            url=source_url,
+                            page_name=page_name,
+                            run_dir=run_dir,
+                            source="design",
+                            breakpoints=BREAKPOINTS,
+                            password=project.framer_password,
+                        ),
+                    )
 
-            for cr in shopify_results:
-                captured_count += 1
-                _publish_fn(
-                    run_id, "capture", page=page_name,
-                    breakpoint_val=cr.breakpoint,
-                    progress=_overall_progress(done_phases, "capture", captured_count / total_captures),
-                    message=f"Captured shopify {page_name} @{cr.breakpoint}px",
-                )
-                if cr.status == "success":
-                    db.add(Capture(
-                        qa_run_id=run_id,
-                        source=CaptureSource.shopify,
-                        page=page_name,
-                        breakpoint=cr.breakpoint,
-                        image_path=cr.image_path,
-                    ))
-
-            shopify_by_bp = {r.breakpoint: r for r in shopify_results if r.status == "success"}
-
-            if skip_design:
-                for bp, sr in shopify_by_bp.items():
-                    capture_pairs.append({
-                        "page": page_name,
-                        "breakpoint": bp,
-                        "shopify_path": sr.image_path,
-                        "design_path": None,
-                        "mode": "ai",
-                    })
-            else:
-                for dr in design_results:
+                for cr in shopify_results:
                     captured_count += 1
                     _publish_fn(
                         run_id, "capture", page=page_name,
-                        breakpoint_val=dr.breakpoint,
+                        breakpoint_val=cr.breakpoint,
                         progress=_overall_progress(done_phases, "capture", captured_count / total_captures),
-                        message=f"Captured design {page_name} @{dr.breakpoint}px",
+                        message=f"Captured shopify {page_name} @{cr.breakpoint}px",
                     )
-                    if dr.status == "success":
+                    if cr.status == "success":
                         db.add(Capture(
                             qa_run_id=run_id,
-                            source=CaptureSource.design,
+                            source=CaptureSource.shopify,
                             page=page_name,
-                            breakpoint=dr.breakpoint,
-                            image_path=dr.image_path,
+                            breakpoint=cr.breakpoint,
+                            image_path=cr.image_path,
                         ))
 
-                design_by_bp = {r.breakpoint: r for r in design_results if r.status == "success"}
-                for bp in BREAKPOINTS:
-                    if bp in shopify_by_bp and bp in design_by_bp:
+                shopify_by_bp = {r.breakpoint: r for r in shopify_results if r.status == "success"}
+
+                if skip_design:
+                    for bp, sr in shopify_by_bp.items():
                         capture_pairs.append({
                             "page": page_name,
                             "breakpoint": bp,
-                            "shopify_path": shopify_by_bp[bp].image_path,
-                            "design_path": design_by_bp[bp].image_path,
-                            "mode": "design",
+                            "shopify_path": sr.image_path,
+                            "design_path": None,
+                            "mode": "ai",
                         })
+                else:
+                    for dr in design_results:
+                        captured_count += 1
+                        _publish_fn(
+                            run_id, "capture", page=page_name,
+                            breakpoint_val=dr.breakpoint,
+                            progress=_overall_progress(done_phases, "capture", captured_count / total_captures),
+                            message=f"Captured design {page_name} @{dr.breakpoint}px",
+                        )
+                        if dr.status == "success":
+                            db.add(Capture(
+                                qa_run_id=run_id,
+                                source=CaptureSource.design,
+                                page=page_name,
+                                breakpoint=dr.breakpoint,
+                                image_path=dr.image_path,
+                            ))
 
-            db.commit()
+                    design_by_bp = {r.breakpoint: r for r in design_results if r.status == "success"}
+                    for bp in BREAKPOINTS:
+                        if bp in shopify_by_bp and bp in design_by_bp:
+                            capture_pairs.append({
+                                "page": page_name,
+                                "breakpoint": bp,
+                                "shopify_path": shopify_by_bp[bp].image_path,
+                                "design_path": design_by_bp[bp].image_path,
+                                "mode": "design",
+                                "design_css": design_by_bp[bp].css_data,
+                                "shopify_css": shopify_by_bp[bp].css_data,
+                            })
+
+                db.commit()
+
+            done_phases.append("capture")
 
         # ---- Phase 3: Compare ----
-        done_phases.append("capture")
         if _should_run("qa", test_types):
             comparison_engine = ComparisonEngine(
-                groq_api_key=settings.groq_api_key,
                 storage_path=settings.storage_path,
+                aws_access_key=settings.aws_access_key,
+                aws_secret_key=settings.aws_bedrock_secret_key,
+                aws_region=settings.aws_region,
+                bedrock_model_id=settings.bedrock_model_id,
             )
             total_comparisons = len(capture_pairs)
 
@@ -454,6 +617,8 @@ async def _run_qa_job_async(
                                 output_dir=_out,
                                 page=pair["page"],
                                 breakpoint=pair["breakpoint"],
+                                design_css=pair.get("design_css", ""),
+                                shopify_css=pair.get("shopify_css", ""),
                             )
                         return pair, result
                     except Exception:
@@ -742,11 +907,15 @@ def run_qa_job(
     partial_pages: Optional[list[str]] = None,
     test_mode: str = "design",
     test_types: Optional[list[str]] = None,
+    page_configs: Optional[list[dict]] = None,
 ) -> dict:
     loop = asyncio.new_event_loop()
     try:
         loop.run_until_complete(
-            _run_qa_job_async(run_id, partial_pages, test_mode, test_types=test_types)
+            _run_qa_job_async(
+                run_id, partial_pages, test_mode,
+                test_types=test_types, page_configs=page_configs,
+            )
         )
     finally:
         loop.close()

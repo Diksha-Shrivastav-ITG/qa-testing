@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listProjects, createProject } from "../api/projects";
 import { startRun } from "../api/runs";
+import type { PageConfig } from "../api/runs";
 import ProjectCard from "../components/projects/ProjectCard";
 import ProjectForm from "../components/projects/ProjectForm";
 import RunQAModal from "../components/runs/RunQAModal";
@@ -43,8 +44,19 @@ const ProjectsPage = () => {
   });
 
   const runMutation = useMutation({
-    mutationFn: ({ projectId, pages, testMode, testTypes }: { projectId: number; pages?: string; testMode?: "design" | "ai"; testTypes?: string[] }) =>
-      startRun(projectId, pages || undefined, testMode || "design", testTypes),
+    mutationFn: ({
+      projectId,
+      pageConfigs,
+      testMode,
+      testTypes,
+      pages,
+    }: {
+      projectId: number;
+      pageConfigs?: PageConfig[];
+      testMode: "design" | "ai";
+      testTypes?: string[];
+      pages?: string;
+    }) => startRun(projectId, pageConfigs, testMode, testTypes, pages),
     onSuccess: (res) => {
       setRunModalProjectId(null);
       navigate(`/runs/${res.data.id}`);
@@ -143,11 +155,12 @@ const ProjectsPage = () => {
       {/* Run QA modal */}
       {runModalProjectId !== null && (
         <RunQAModal
-          onConfirm={(pages, testMode, testTypes) =>
-            runMutation.mutate({ projectId: runModalProjectId, pages, testMode, testTypes })
+          onConfirm={(pageConfigs, testMode, testTypes, pages) =>
+            runMutation.mutate({ projectId: runModalProjectId, pageConfigs, testMode, testTypes, pages })
           }
           onCancel={() => setRunModalProjectId(null)}
           isLoading={runMutation.isPending}
+          sourceType={projects.find((p) => p.id === runModalProjectId)?.source_type ?? "none"}
         />
       )}
     </div>

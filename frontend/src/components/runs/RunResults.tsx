@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getRun, getCaptures, getAccessibility, getLinkAudit, getSeo, getPerformance } from "../../api/runs";
+import { getRun, getCaptures, getComparisons, getAccessibility, getLinkAudit, getSeo, getPerformance } from "../../api/runs";
+import SideBySideViewer from "../comparison/SideBySideViewer";
 import { listIssues } from "../../api/issues";
 import { getProject } from "../../api/projects";
 import PromptBuilder from "./PromptBuilder";
@@ -58,6 +59,23 @@ interface LinkAuditItem {
   aria_label?: string;
 }
 
+interface PageConfigData {
+  label: string;
+  mode: string;
+  shopify_url: string;
+  reference_url?: string | null;
+}
+
+interface ComparisonItem {
+  id: number;
+  page: string;
+  breakpoint: number;
+  ssim_score: number | null;
+  diff_image_url: string | null;
+  heatmap_url: string | null;
+  ai_analysis_status: string;
+}
+
 interface RunData {
   id: number;
   project_id: number;
@@ -67,6 +85,7 @@ interface RunData {
   started_at: string;
   test_mode?: string;
   test_types?: string | null; // comma-separated, null = Full QA (all tests)
+  page_configs?: PageConfigData[] | null;
 }
 
 // ---------- Helpers ----------
@@ -814,9 +833,10 @@ interface ScoreCardProps {
   issues: Issue[];
   accCount: number;
   testMode?: string;
+  hasDesignComparison?: boolean;
 }
 
-const ScoreCard = ({ score, threshold, issues, accCount, testMode }: ScoreCardProps) => {
+const ScoreCard = ({ score, threshold, issues, accCount, testMode, hasDesignComparison }: ScoreCardProps) => {
   const passed = score !== null && score >= threshold;
   const critCount = issues.filter((i) => i.severity === "critical").length;
   const majorCount = issues.filter((i) => i.severity === "major").length;
@@ -872,9 +892,14 @@ const ScoreCard = ({ score, threshold, issues, accCount, testMode }: ScoreCardPr
                 {passed ? "QA Passed" : "QA Failed"}
               </span>
             )}
-            {testMode === "ai" && (
+            {testMode === "ai" && !hasDesignComparison && (
               <span className="text-xs px-2.5 py-1 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/25 font-semibold">
                 AI Mode
+              </span>
+            )}
+            {hasDesignComparison && (
+              <span className="text-xs px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/25 font-semibold">
+                Design Comparison
               </span>
             )}
           </div>
@@ -948,6 +973,12 @@ const RunResults = ({ runId }: RunResultsProps) => {
     enabled: !!runId,
   });
 
+  const { data: comparisonsData } = useQuery<ComparisonItem[]>({
+    queryKey: ["comparisons", runId],
+    queryFn: () => getComparisons(runId).then((r) => r.data),
+    enabled: !!runId,
+  });
+
   const { data: accData } = useQuery<AccessibilityItem[]>({
     queryKey: ["accessibility", runId],
     queryFn: () => getAccessibility(runId).then((r) => r.data),
@@ -1009,7 +1040,13 @@ const RunResults = ({ runId }: RunResultsProps) => {
   const threshold = projectData?.pass_threshold ?? 90;
   const issues: Issue[] = allIssues ?? [];
   const captures: Capture[] = capturesData ?? [];
+  const comparisons: ComparisonItem[] = comparisonsData ?? [];
   const accItems: AccessibilityItem[] = accData ?? [];
+
+  // Check if any page used design comparison mode
+  const hasDesignComparison =
+    (run.page_configs?.some((pc) => pc.mode === "design") ?? false) ||
+    captures.some((c) => c.source === "design");
   const linkItems: LinkAuditItem[] = linkData ?? [];
   const seoItems: SeoItem[] = seoData ?? [];
   const perfItems: PerfItem[] = perfData ?? [];
@@ -1069,6 +1106,7 @@ const RunResults = ({ runId }: RunResultsProps) => {
         issues={issues}
         accCount={accItems.length}
         testMode={run.test_mode}
+        hasDesignComparison={hasDesignComparison}
       />
 
       {/* Custom Run badge — only shown when test_types is set */}
@@ -1115,6 +1153,134 @@ const RunResults = ({ runId }: RunResultsProps) => {
           </button>
         )}
       </div>
+
+      {/* Visual Comparison Section — shown when design captures exist */}
+      {hasDesignComparison && (() => {
+        // Get unique pages that have design captures
+        const designPages = [...new Set(captures.filter((c) => c.source === "design").map((c) => c.page))];
+        return designPages.map((pageName) => {
+          // Find best breakpoint (largest) for both sources
+          const shopifyCapture = captures
+            .filter((c) => c.page === pageName && c.source === "shopify")
+            .sort((a, b) => b.breakpoint - a.breakpoint)[0];
+          const designCapture = captures
+            .filter((c) => c.page === pageName && c.source === "design")
+            .sort((a, b) => b.breakpoint - a.breakpoint)[0];
+          const comparison = comparisons
+            .filter((c) => c.page === pageName)
+            .sort((a, b) => b.breakpoint - a.breakpoint)[0];
+
+          if (!shopifyCapture && !designCapture) return null;
+
+          return (
+            <div
+              key={`comparison-${pageName}`}
+              className="border border-gray-200 dark:border-slate-700/60 rounded-2xl overflow-hidden bg-white dark:bg-slate-800/30 backdrop-blur-sm"
+            >
+              <div className="px-5 py-4 bg-gray-100 dark:bg-slate-700/40 border-b border-gray-200 dark:border-slate-700/60">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="bg-gradient-to-br from-blue-600 to-cyan-600 text-white text-xs font-bold rounded-lg w-7 h-7 flex items-center justify-center shadow-lg shadow-blue-500/20">
+                      VS
+                    </span>
+                    <span className="font-semibold text-gray-900 dark:text-white text-sm">
+                      Visual Comparison — {pageName === "home" ? "Homepage" : `/${pageName}`}
+                    </span>
+                  </div>
+                  {comparison && comparison.ssim_score != null && (
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-2.5 py-1 rounded-full font-semibold border ${
+                        comparison.ssim_score >= 0.95
+                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
+                          : comparison.ssim_score >= 0.8
+                          ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/25"
+                          : "bg-red-500/10 text-red-400 border-red-500/25"
+                      }`}>
+                        SSIM: {(comparison.ssim_score * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="p-5">
+                <SideBySideViewer
+                  designImageUrl={designCapture?.image_url ? captureUrl(designCapture.image_url) : undefined}
+                  shopifyImageUrl={shopifyCapture?.image_url ? captureUrl(shopifyCapture.image_url) : undefined}
+                  diffOverlayUrl={comparison?.heatmap_url ? captureUrl(comparison.heatmap_url) : undefined}
+                />
+                {/* Breakpoint selector */}
+                {(() => {
+                  const breakpoints = [...new Set(
+                    captures.filter((c) => c.page === pageName && c.source === "design").map((c) => c.breakpoint)
+                  )].sort((a, b) => b - a);
+                  if (breakpoints.length <= 1) return null;
+                  return (
+                    <div className="mt-4 flex items-center gap-2">
+                      <span className="text-xs text-gray-500 dark:text-slate-400">All breakpoints:</span>
+                      {breakpoints.map((bp) => {
+                        const comp = comparisons.find((c) => c.page === pageName && c.breakpoint === bp);
+                        return (
+                          <span key={bp} className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-300">
+                            {bp}px {comp?.ssim_score != null ? `(${(comp.ssim_score * 100).toFixed(1)}%)` : ""}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
+                {/* Written differences for this page */}
+                {(() => {
+                  const pageIssues = issues.filter((i) => i.page === pageName);
+                  if (pageIssues.length === 0) return null;
+                  return (
+                    <div className="mt-6 border-t border-gray-200 dark:border-slate-700/60 pt-5">
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+                        <svg className="w-4 h-4 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                        </svg>
+                        Differences Found ({pageIssues.length})
+                      </h4>
+                      <div className="space-y-3">
+                        {pageIssues.map((issue) => (
+                          <div
+                            key={issue.id}
+                            className="bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700/50 rounded-xl px-4 py-3"
+                          >
+                            <div className="flex items-start gap-3">
+                              <span className={`mt-0.5 shrink-0 text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
+                                SEVERITY_STYLES[issue.severity] ?? "bg-gray-500/10 text-gray-400 border border-gray-500/25"
+                              }`}>
+                                {issue.severity}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                {issue.element_selector && (
+                                  <p className="text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
+                                    {issue.element_selector}
+                                  </p>
+                                )}
+                                <p className="text-xs text-gray-600 dark:text-slate-400 leading-relaxed">
+                                  {issue.description}
+                                </p>
+                                {issue.ai_suggestion && (
+                                  <div className="mt-2 bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/20 rounded-lg px-3 py-2">
+                                    <p className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide mb-0.5">Suggested Fix</p>
+                                    <p className="text-xs text-emerald-700 dark:text-emerald-300 font-mono">{issue.ai_suggestion}</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          );
+        });
+      })()}
 
       {/* Page-by-page sections */}
       {pagesWithIssues.map((pageName, idx) => (

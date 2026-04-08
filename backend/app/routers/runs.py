@@ -20,7 +20,7 @@ from app.models.project import Project
 from app.models.qa_run import QaRun, RunStatus
 from app.models.user import User
 from app.schemas.pagination import PaginatedResponse
-from app.schemas.qa_run import RunResponse
+from app.schemas.qa_run import RunResponse, StartRunRequest
 from app.services.auth_service import decode_token
 from app.services.run_service import get_next_run_number
 
@@ -30,14 +30,15 @@ router = APIRouter(tags=["runs"])
 def _dispatch_qa_task(
     run_id: int,
     partial_pages: Optional[list[str]] = None,
-    test_mode: str = "design",
+    test_mode: str = "ai",
     test_types: Optional[list[str]] = None,
+    page_configs: Optional[list[dict]] = None,
 ) -> None:
     """Dispatch the Celery QA task. Silently swallows errors (e.g. no broker)."""
     try:
         from app.workers.qa_tasks import run_qa_job
 
-        run_qa_job.delay(run_id, partial_pages, test_mode, test_types)
+        run_qa_job.delay(run_id, partial_pages, test_mode, test_types, page_configs)
     except Exception:
         pass
 
@@ -71,14 +72,15 @@ def _check_owner_or_admin(project: Project, user: User) -> None:
 )
 def start_run(
     project_id: int,
-    partial: bool = Query(default=False),
-    pages: Optional[str] = Query(default=None, description="Comma-separated page slugs"),
-    test_mode: str = Query(default="design", description="'design' = compare vs Framer/Figma, 'ai' = AI-only analysis"),
-    test_types: Optional[list[str]] = Query(default=None, description="Which test phases to run: qa, functional, ada, seo, performance"),
+    body: Optional[StartRunRequest] = None,
+    # Keep query params as fallback for backward compat (Full QA from old clients)
+    pages: Optional[str] = Query(default=None, description="Comma-separated page slugs (legacy)"),
+    test_mode: str = Query(default="ai", description="'design' or 'ai' (legacy, used when no body)"),
+    test_types: Optional[list[str]] = Query(default=None, description="Test phases (legacy)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin", "developer")),
 ) -> RunResponse:
-    """Start a new QA run for a project. Returns 409 if a run is already in progress."""
+    """Start a new QA run for a project. Accepts JSON body or query params."""
     project = _get_project_or_404(db, project_id)
     _check_owner_or_admin(project, current_user)
 
@@ -94,21 +96,46 @@ def start_run(
             detail="A run is already in progress for this project.",
         )
 
+    # Resolve params: prefer JSON body over query params
+    if body is not None:
+        effective_page_configs = (
+            [pc.model_dump() for pc in body.page_configs] if body.page_configs else None
+        )
+        effective_test_mode = body.test_mode or "ai"
+        effective_test_types = body.test_types
+        effective_pages = None
+    else:
+        effective_page_configs = None
+        effective_test_mode = test_mode
+        effective_test_types = test_types
+        effective_pages = pages
+
     run_number = get_next_run_number(db, project_id)
     run = QaRun(
         project_id=project_id,
         status=RunStatus.running,
         run_number=run_number,
-        test_mode=test_mode,
-        test_types=",".join(test_types) if test_types else None,
+        test_mode=effective_test_mode,
+        test_types=",".join(effective_test_types) if effective_test_types else None,
+        page_configs=effective_page_configs,
     )
     db.add(run)
     db.commit()
     db.refresh(run)
 
-    # Dispatch Celery task to execute the QA run asynchronously
-    partial_pages = [p.strip() for p in pages.split(",") if p.strip()] if pages else None
-    _dispatch_qa_task(run.id, partial_pages, test_mode, test_types)
+    # Dispatch Celery task
+    partial_pages = (
+        [p.strip() for p in effective_pages.split(",") if p.strip()]
+        if effective_pages
+        else None
+    )
+    _dispatch_qa_task(
+        run.id,
+        partial_pages,
+        effective_test_mode,
+        effective_test_types,
+        effective_page_configs,
+    )
 
     return run  # type: ignore[return-value]
 
@@ -232,6 +259,45 @@ def get_run_captures(
             "image_url": image_url,
         })
     return result
+
+
+@router.get("/api/runs/{run_id}/comparisons")
+def get_run_comparisons(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list:
+    """Return all comparisons for a run with diff/heatmap image URLs."""
+    from app.models.comparison import Comparison as ComparisonModel
+    from app.config import settings
+
+    _get_run_or_404(db, run_id)
+    comparisons = (
+        db.query(ComparisonModel)
+        .filter(ComparisonModel.qa_run_id == run_id)
+        .order_by(ComparisonModel.page, ComparisonModel.breakpoint)
+        .all()
+    )
+    storage_base = settings.storage_path.rstrip("/")
+
+    def to_url(path: str | None) -> str | None:
+        if not path:
+            return None
+        rel = path.replace(storage_base, "").lstrip("/")
+        return f"/storage/{rel}"
+
+    return [
+        {
+            "id": c.id,
+            "page": c.page,
+            "breakpoint": c.breakpoint,
+            "ssim_score": c.ssim_score,
+            "diff_image_url": to_url(c.diff_image_path),
+            "heatmap_url": to_url(c.heatmap_path),
+            "ai_analysis_status": c.ai_analysis_status.value,
+        }
+        for c in comparisons
+    ]
 
 
 @router.get("/api/runs/{run_id}/stream")
@@ -547,19 +613,46 @@ Format the output as a ready-to-paste prompt for Claude Code. Start with a clear
 
 IMPORTANT: The prompt should be self-contained — the developer should be able to paste it directly into Claude Code and get all issues fixed without needing additional context."""
 
-    # Call Groq AI
+    # Call AWS Bedrock AI
     try:
-        from groq import AsyncGroq
+        import boto3
+        import logging as _logging
 
-        client = AsyncGroq(api_key=settings.groq_api_key)
-        response = await client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[{"role": "user", "content": groq_prompt}],
-            temperature=0.3,
-            max_tokens=4096,
+        _logger = _logging.getLogger(__name__)
+
+        bedrock = boto3.client(
+            "bedrock-runtime",
+            region_name=settings.aws_region,
+            aws_access_key_id=settings.aws_access_key,
+            aws_secret_access_key=settings.aws_bedrock_secret_key,
         )
-        ai_prompt = response.choices[0].message.content.strip()
-    except Exception as exc:
+        response = bedrock.converse(
+            modelId=settings.bedrock_model_id,
+            messages=[
+                {"role": "user", "content": [{"text": groq_prompt}]}
+            ],
+            inferenceConfig={"maxTokens": 4096, "temperature": 0.3},
+        )
+
+        # Log token usage
+        usage = response.get("usage", {})
+        _logger.info(
+            "BEDROCK_USAGE | endpoint=generate-prompt | model=%s | input_tokens=%d | output_tokens=%d | total_tokens=%d | stop_reason=%s",
+            settings.bedrock_model_id,
+            usage.get("inputTokens", 0),
+            usage.get("outputTokens", 0),
+            usage.get("totalTokens", 0),
+            response.get("stopReason", "unknown"),
+        )
+
+        output_message = response.get("output", {}).get("message", {})
+        content_list = output_message.get("content", [])
+        ai_prompt = ""
+        for block in content_list:
+            if "text" in block:
+                ai_prompt += block["text"]
+        ai_prompt = ai_prompt.strip()
+    except Exception:
         # Fallback: generate a basic prompt without AI
         ai_prompt = _fallback_prompt(body, issues_text, acc_text)
 

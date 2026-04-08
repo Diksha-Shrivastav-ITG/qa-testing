@@ -17,6 +17,7 @@ class SourceType(str, enum.Enum):
     framer = "framer"
     figma = "figma"
     none = "none"
+    other = "other"
 
 
 class Project(Base):
