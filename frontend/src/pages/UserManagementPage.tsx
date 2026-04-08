@@ -128,7 +128,7 @@ const UserManagementPage = () => {
                     )}
                   </td>
                   <td className="px-5 py-3 text-gray-400 text-xs">
-                    {new Date(user.created_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}
+                    {new Date(user.created_at).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric", timeZone: "Asia/Kolkata" })}
                   </td>
                   <td className="px-5 py-3 text-right">
                     {editingId === user.id ? (

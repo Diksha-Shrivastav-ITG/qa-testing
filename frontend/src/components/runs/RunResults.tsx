@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getRun, getCaptures, getAccessibility, getLinkAudit, getSeo, getPerformance } from "../../api/runs";
 import { listIssues } from "../../api/issues";
@@ -17,6 +17,7 @@ interface Issue {
   ai_suggestion?: string;
   element_selector?: string;
   screenshot_path?: string;
+  screenshot_url?: string;
 }
 
 interface PaginatedResponse {
@@ -71,19 +72,18 @@ interface RunData {
 
 // ---------- Helpers ----------
 
-const BACKEND = "";
 
 const SEVERITY_STYLES: Record<string, string> = {
-  critical: "bg-red-500/10 text-red-400 border border-red-500/25",
-  major:    "bg-orange-500/10 text-orange-400 border border-orange-500/25",
-  minor:    "bg-yellow-500/10 text-yellow-400 border border-yellow-500/25",
-  error:    "bg-red-500/10 text-red-400 border border-red-500/25",
-  warning:  "bg-orange-500/10 text-orange-400 border border-orange-500/25",
-  notice:   "bg-blue-500/10 text-blue-400 border border-blue-500/25",
+  critical: "bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/25",
+  major:    "bg-orange-500/10 text-orange-700 dark:text-orange-400 border border-orange-500/25",
+  minor:    "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border border-yellow-500/25",
+  error:    "bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/25",
+  warning:  "bg-orange-500/10 text-orange-700 dark:text-orange-400 border border-orange-500/25",
+  notice:   "bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/25",
 };
 
 const sevStyle = (s: string) =>
-  SEVERITY_STYLES[s?.toLowerCase()] ?? "bg-gray-100 dark:bg-slate-700/60 text-gray-500 dark:text-slate-400 border border-gray-300 dark:border-slate-600";
+  SEVERITY_STYLES[s?.toLowerCase()] ?? "bg-gray-100 dark:bg-slate-700/60 text-gray-600 dark:text-slate-400 border border-gray-300 dark:border-slate-600";
 
 const SEVERITY_ORDER: Record<string, number> = {
   critical: 0,
@@ -104,10 +104,6 @@ const pageLabel = (p: string) => {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
-const captureUrl = (imageUrl: string | null) => {
-  if (!imageUrl) return undefined;
-  return `${BACKEND}${imageUrl}`;
-};
 
 function groupBy<T>(arr: T[], key: (item: T) => string): Record<string, T[]> {
   const result: Record<string, T[]> = {};
@@ -170,6 +166,52 @@ const Collapsible = ({ defaultOpen = false, header, children }: CollapsibleProps
   );
 };
 
+// ---------- Screenshot Lightbox ----------
+
+interface LightboxProps {
+  src: string;
+  alt: string;
+  onClose: () => void;
+}
+
+const Lightbox = ({ src, alt, onClose }: LightboxProps) => {
+  // Close on backdrop click or Escape
+  const handleKey = useCallback((e: KeyboardEvent) => {
+    if (e.key === "Escape") onClose();
+  }, [onClose]);
+
+  useEffect(() => {
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [handleKey]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative max-w-5xl w-full max-h-[90vh] overflow-auto rounded-xl shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+        <img
+          src={src}
+          alt={alt}
+          className="w-full h-auto rounded-xl"
+        />
+      </div>
+    </div>
+  );
+};
+
 // ---------- Issue Card ----------
 
 interface IssueCardProps {
@@ -179,52 +221,105 @@ interface IssueCardProps {
 
 const IssueCard = ({ issue, num }: IssueCardProps) => {
   const [expanded, setExpanded] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const hasDetails = !!(issue.screenshot_url || issue.ai_suggestion);
 
   return (
-    <div
-      className="p-3 bg-gray-50 dark:bg-slate-700/30 rounded-xl border border-gray-200 dark:border-slate-700/50 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700/50 hover:border-gray-300 dark:hover:border-slate-600/60 transition-all"
-      onClick={() => setExpanded((v) => !v)}
-    >
-      <div className="flex items-start gap-3">
-        <span className="text-[10px] font-mono text-gray-400 dark:text-slate-600 mt-0.5 shrink-0 pt-0.5">
-          {num}
-        </span>
-        <span
-          className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${sevStyle(issue.severity)}`}
-        >
-          {issue.severity}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm text-slate-200 leading-relaxed">{issue.description}</p>
-          {issue.element_selector && (
-            <p className="text-[10px] font-mono text-gray-400 dark:text-slate-500 mt-1 truncate bg-gray-100 dark:bg-slate-800/60 px-2 py-0.5 rounded">
-              {issue.element_selector}
-            </p>
-          )}
-          <div className="flex gap-3 mt-1.5">
-            <span className="text-[10px] text-slate-500 capitalize font-medium">{issue.type}</span>
-            {issue.breakpoint && (
-              <span className="text-[10px] text-slate-500">{issue.breakpoint}px</span>
+    <>
+      {lightboxOpen && issue.screenshot_url && (
+        <Lightbox
+          src={issue.screenshot_url}
+          alt={issue.element_selector || issue.description}
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
+
+      <div
+        className={`p-3 bg-gray-50 dark:bg-slate-700/30 rounded-xl border border-gray-200 dark:border-slate-700/50 transition-all${hasDetails ? " cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700/50 hover:border-gray-300 dark:hover:border-slate-600/60" : ""}`}
+        onClick={() => hasDetails && setExpanded((v) => !v)}
+      >
+        <div className="flex items-start gap-3">
+          <span className="text-[10px] font-mono text-gray-400 dark:text-slate-600 mt-0.5 shrink-0 pt-0.5">
+            {num}
+          </span>
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${sevStyle(issue.severity)}`}
+          >
+            {issue.severity}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm text-gray-800 dark:text-slate-200 leading-relaxed">{issue.description}</p>
+            {issue.element_selector && (
+              <p className="text-[10px] font-mono text-gray-400 dark:text-slate-500 mt-1 truncate bg-gray-100 dark:bg-slate-800/60 px-2 py-0.5 rounded">
+                {issue.element_selector}
+              </p>
+            )}
+            <div className="flex gap-3 mt-1.5">
+              <span className="text-[10px] text-gray-500 dark:text-slate-500 capitalize font-medium">{issue.type}</span>
+              {issue.breakpoint && (
+                <span className="text-[10px] text-gray-500 dark:text-slate-500">{issue.breakpoint}px</span>
+              )}
+            </div>
+
+            {expanded && (
+              <div className="mt-3 space-y-3">
+                {/* Annotated issue screenshot */}
+                {issue.screenshot_url && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-[10px] font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wide">
+                        Issue Screenshot
+                      </p>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setLightboxOpen(true); }}
+                        className="flex items-center gap-1 text-[10px] font-medium text-violet-500 hover:text-violet-600 transition-colors"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                        </svg>
+                        Expand
+                      </button>
+                    </div>
+                    <div
+                      className="rounded-lg overflow-hidden border border-red-400/50 dark:border-red-500/40 shadow-sm cursor-zoom-in bg-gray-100 dark:bg-slate-800"
+                      onClick={(e) => { e.stopPropagation(); setLightboxOpen(true); }}
+                    >
+                      <img
+                        src={issue.screenshot_url}
+                        alt={`Issue: ${issue.element_selector || issue.description}`}
+                        className="w-full h-auto block"
+                        loading="lazy"
+                        onError={(e) => {
+                          const el = e.target as HTMLImageElement;
+                          el.style.display = "none";
+                          el.parentElement!.style.display = "none";
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+                {/* Fix suggestion */}
+                {issue.ai_suggestion && (
+                  <div className="text-xs bg-violet-500/10 border border-violet-500/20 text-violet-700 dark:text-violet-300 px-3 py-2.5 rounded-lg leading-relaxed">
+                    <span className="font-semibold text-violet-700 dark:text-violet-400">How to fix: </span>
+                    {issue.ai_suggestion}
+                  </div>
+                )}
+              </div>
             )}
           </div>
-
-          {expanded && issue.ai_suggestion && (
-            <div className="mt-3">
-              <div className="text-xs bg-violet-500/10 border border-violet-500/20 text-violet-300 px-3 py-2.5 rounded-lg leading-relaxed">
-                <span className="font-semibold text-violet-400">AI Suggestion: </span>
-                {issue.ai_suggestion}
-              </div>
-            </div>
+          {hasDetails && (
+            <svg
+              className={`w-3.5 h-3.5 text-gray-400 dark:text-slate-600 shrink-0 mt-0.5 transition-transform ${expanded ? "rotate-180" : ""}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
           )}
         </div>
-        <svg
-          className={`w-3.5 h-3.5 text-gray-400 dark:text-slate-600 shrink-0 mt-0.5 transition-transform ${expanded ? "rotate-180" : ""}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-        </svg>
       </div>
-    </div>
+    </>
   );
 };
 
@@ -249,7 +344,7 @@ const TypeSubsection = ({
       header={(open, toggle) => (
         <button
           onClick={toggle}
-          className="w-full flex items-center justify-between px-3 py-2 hover:bg-slate-700/30 transition-colors text-left rounded-lg"
+          className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-100 dark:hover:bg-slate-700/30 transition-colors text-left rounded-lg"
         >
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-widest">
@@ -260,7 +355,7 @@ const TypeSubsection = ({
             </span>
           </div>
           <svg
-            className={`w-3.5 h-3.5 text-slate-600 transition-transform ${open ? "rotate-180" : ""}`}
+            className={`w-3.5 h-3.5 text-gray-400 dark:text-slate-600 transition-transform ${open ? "rotate-180" : ""}`}
             fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
@@ -287,22 +382,13 @@ interface PageSectionProps {
   pageName: string;
   pageNumber: number;
   issues: Issue[];
-  captures: Capture[];
 }
 
 const PageSection = ({
   pageName,
   pageNumber,
   issues,
-  captures,
 }: PageSectionProps) => {
-  // Find the shopify full-page screenshot for the largest breakpoint
-  const pageCaptures = captures.filter(
-    (c) => c.page === pageName && c.source === "shopify"
-  );
-  const bestCapture =
-    pageCaptures.sort((a, b) => b.breakpoint - a.breakpoint)[0] ?? null;
-
   // Group issues by type, with a stable ordering
   const typeOrder = ["visual", "functional", "content"];
   const byType = groupBy(issues, (i) => i.type ?? "other");
@@ -330,7 +416,7 @@ const PageSection = ({
 
   return (
     <Collapsible
-      defaultOpen={false}
+      defaultOpen={true}
       header={(open, toggle) => (
         <button
           onClick={toggle}
@@ -372,40 +458,9 @@ const PageSection = ({
         </button>
       )}
     >
-      <div className="flex gap-5 p-5">
-        {/* Left: full-page screenshot */}
-        <div className="w-[300px] shrink-0">
-          <div className="sticky top-4">
-            <div className="text-[10px] font-semibold text-gray-500 dark:text-slate-500 uppercase tracking-widest mb-2">
-              Screenshot
-            </div>
-            <div className="border border-gray-200 dark:border-slate-700/60 rounded-xl overflow-hidden bg-gray-50 dark:bg-slate-800/40">
-              {bestCapture?.image_url ? (
-                <img
-                  src={captureUrl(bestCapture.image_url)}
-                  alt={`${pageLabel(pageName)} screenshot`}
-                  className="w-full object-contain"
-                  style={{ maxHeight: "800px" }}
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-slate-500 text-sm gap-2">
-                  <svg className="w-8 h-8 text-gray-300 dark:text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-                  </svg>
-                  No screenshot
-                </div>
-              )}
-            </div>
-            {bestCapture && (
-              <div className="text-[10px] text-gray-400 dark:text-slate-600 mt-1.5 text-center">
-                {bestCapture.breakpoint}px breakpoint
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right: issues list grouped by type */}
-        <div className="flex-1 min-w-0 space-y-3">
+      <div className="p-5">
+        {/* Issues list grouped by type */}
+        <div className="space-y-3">
           {issues.length === 0 ? (
             <div className="text-center py-10">
               <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-3">
@@ -590,9 +645,9 @@ const LinkAuditSection = ({ items, sectionNum }: LinkSectionProps) => {
               key={page}
               className="border border-gray-200 dark:border-slate-700/50 rounded-xl p-3 space-y-1"
             >
-              <h4 className="text-xs font-semibold text-slate-400 mb-2 flex items-center justify-between">
+              <h4 className="text-xs font-semibold text-gray-600 dark:text-slate-400 mb-2 flex items-center justify-between">
                 <span>{pageLabel(page)}</span>
-                <span className="text-slate-500 font-normal">
+                <span className="text-gray-500 dark:text-slate-500 font-normal">
                   {pageItems.length} link{pageItems.length !== 1 ? "s" : ""}
                 </span>
               </h4>
@@ -771,7 +826,7 @@ const PerfSection = ({ items, sectionNum }: { items: PerfItem[]; sectionNum: num
                   <div className="text-[10px] text-gray-500 dark:text-slate-500 uppercase mt-0.5">TTFB</div>
                 </div>
                 <div className="bg-gray-100 dark:bg-slate-700/40 rounded-xl px-3 py-2.5 text-center border border-gray-200 dark:border-slate-700/50">
-                  <div className={`text-lg font-bold ${p.total_size_bytes > 5*1024*1024 ? "text-red-400" : "text-gray-900 dark:text-white"}`}>{fmtBytes(p.total_size_bytes)}</div>
+                  <div className={`text-lg font-bold ${p.total_size_bytes > 5*1024*1024 ? "text-red-600 dark:text-red-400" : "text-gray-900 dark:text-white"}`}>{fmtBytes(p.total_size_bytes)}</div>
                   <div className="text-[10px] text-gray-500 dark:text-slate-500 uppercase mt-0.5">Page Size</div>
                 </div>
                 <div className="bg-gray-100 dark:bg-slate-700/40 rounded-xl px-3 py-2.5 text-center border border-gray-200 dark:border-slate-700/50">
@@ -850,7 +905,7 @@ const ScoreCard = ({ score, threshold, issues, accCount, testMode }: ScoreCardPr
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <span className={`text-3xl font-bold leading-none ${
-              score === null ? "text-slate-500" : passed ? "text-emerald-400" : "text-red-400"
+              score === null ? "text-slate-500" : passed ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
             }`}>
               {score !== null ? score : "—"}
             </span>
@@ -897,10 +952,10 @@ const ScoreCard = ({ score, threshold, issues, accCount, testMode }: ScoreCardPr
             {[
               { label: "Threshold", value: `${threshold}%`, color: "text-gray-700 dark:text-slate-300" },
               { label: "Total", value: issues.length, color: "text-gray-700 dark:text-slate-300" },
-              { label: "Critical", value: critCount, color: critCount > 0 ? "text-red-400" : "text-slate-500" },
-              { label: "Major", value: majorCount, color: majorCount > 0 ? "text-orange-400" : "text-slate-500" },
-              { label: "Minor", value: minorCount, color: minorCount > 0 ? "text-yellow-400" : "text-slate-500" },
-              { label: "ADA", value: accCount, color: accCount > 0 ? "text-blue-400" : "text-slate-500" },
+              { label: "Critical", value: critCount, color: critCount > 0 ? "text-red-600 dark:text-red-400" : "text-gray-400 dark:text-slate-500" },
+              { label: "Major", value: majorCount, color: majorCount > 0 ? "text-orange-600 dark:text-orange-400" : "text-gray-400 dark:text-slate-500" },
+              { label: "Minor", value: minorCount, color: minorCount > 0 ? "text-yellow-600 dark:text-yellow-400" : "text-gray-400 dark:text-slate-500" },
+              { label: "ADA", value: accCount, color: accCount > 0 ? "text-blue-600 dark:text-blue-400" : "text-gray-400 dark:text-slate-500" },
             ].map(({ label, value, color }) => (
               <div key={label} className="bg-gray-100 dark:bg-slate-700/40 rounded-xl px-3 py-2 text-center border border-gray-200 dark:border-slate-700/50">
                 <p className={`text-base font-bold ${color}`}>{value}</p>
@@ -1038,13 +1093,27 @@ const RunResults = ({ runId }: RunResultsProps) => {
   // Determine which sections were actually run
   // test_types is null → Full QA → show everything
   const runTypes = run.test_types ? new Set(run.test_types.split(",")) : null;
+  const showQA = runTypes === null || runTypes.has("qa");
+  const showFunctional = runTypes === null || runTypes.has("functional");
   const showAda = runTypes === null || runTypes.has("ada");
   const showLinkAudit = runTypes === null || runTypes.has("link_audit");
   const showSeo = runTypes === null || runTypes.has("seo");
   const showPerf = runTypes === null || runTypes.has("performance");
 
+  // Only include page-level issues from tests that were selected
+  // QA issues = visual/content, Functional issues = functional type
+  const filteredIssuesByPage: Record<string, Issue[]> = {};
+  for (const page of pagesWithIssues) {
+    const pageIssues = (issuesByPage[page] ?? []).filter((i) => {
+      if (i.type === "functional") return showFunctional;
+      return showQA; // visual, content, other
+    });
+    if (pageIssues.length > 0) filteredIssuesByPage[page] = pageIssues;
+  }
+  const visiblePages = pagesWithIssues.filter((p) => filteredIssuesByPage[p]?.length > 0);
+
   // Section numbering: pages first, then only sections that were run
-  let sectionCounter = pagesWithIssues.length;
+  let sectionCounter = visiblePages.length;
   const accSectionNum = showAda ? ++sectionCounter : 0;
   const linkSectionNum = showLinkAudit ? ++sectionCounter : 0;
   const seoSectionNum = showSeo ? ++sectionCounter : 0;
@@ -1100,7 +1169,7 @@ const RunResults = ({ runId }: RunResultsProps) => {
           </span>
           <span className="text-gray-300 dark:text-slate-700">|</span>
           <span className="text-xs text-gray-400 dark:text-slate-600">
-            {pagesWithIssues.length} page{pagesWithIssues.length !== 1 ? "s" : ""} affected
+            {visiblePages.length} page{visiblePages.length !== 1 ? "s" : ""} affected
           </span>
         </div>
         {issues.length > 0 && (
@@ -1116,8 +1185,8 @@ const RunResults = ({ runId }: RunResultsProps) => {
         )}
       </div>
 
-      {/* Page-by-page sections */}
-      {pagesWithIssues.map((pageName, idx) => (
+      {/* Page-by-page sections — only for selected test types */}
+      {visiblePages.map((pageName, idx) => (
         <div
           key={pageName}
           className="border border-gray-200 dark:border-slate-700/60 rounded-2xl overflow-hidden bg-white dark:bg-slate-800/30 backdrop-blur-sm"
@@ -1125,8 +1194,7 @@ const RunResults = ({ runId }: RunResultsProps) => {
           <PageSection
             pageName={pageName}
             pageNumber={idx + 1}
-            issues={issuesByPage[pageName] ?? []}
-            captures={captures}
+            issues={filteredIssuesByPage[pageName] ?? []}
           />
         </div>
       ))}

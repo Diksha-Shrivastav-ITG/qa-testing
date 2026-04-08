@@ -38,7 +38,7 @@ def _setup_run_with_issues(client: TestClient, token: str, db: Session) -> tuple
     # Add issues directly to the test DB
     issue1 = Issue(
         qa_run_id=run_id,
-        page="/home",
+        page="/",
         breakpoint=1440,
         type=IssueType.visual,
         severity=IssueSeverity.critical,

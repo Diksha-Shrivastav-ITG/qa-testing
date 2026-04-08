@@ -13,12 +13,18 @@ interface Run {
   run_number?: number;
 }
 
+interface PagePair {
+  source_path: string;
+  shopify_path: string;
+}
+
 interface Project {
   id: number;
   name: string;
   shopify_url: string;
   source_type: string;
-  source_url: string;
+  source_url?: string;
+  page_pairs?: PagePair[];
 }
 
 type Tab = "runs" | "settings";
@@ -54,8 +60,11 @@ const ProjectDetailPage = () => {
 
   const [activeTab, setActiveTab] = useState<Tab>("runs");
   const [settingsForm, setSettingsForm] = useState<Partial<Project>>({});
+  const [localPairs, setLocalPairs] = useState<PagePair[]>([]);
   const [editMode, setEditMode] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
 
   const { data: project, isLoading: projectLoading, isError: projectError } = useQuery<Project>({
     queryKey: ["project", projectId],
@@ -71,12 +80,17 @@ const ProjectDetailPage = () => {
   });
 
   const runMutation = useMutation({
-    mutationFn: ({ pages, testMode, testTypes }: { pages: string; testMode: "design" | "ai"; testTypes?: string[] }) =>
-      startRun(projectId, pages || undefined, testMode, testTypes),
+    mutationFn: ({ pages, testMode, testTypes, referenceUrls }: { pages: string; testMode: "design" | "ai"; testTypes?: string[]; referenceUrls?: string }) =>
+      startRun(projectId, pages || undefined, testMode, testTypes, referenceUrls),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["runs", projectId] });
       setShowRunModal(false);
+      setRunError(null);
       navigate(`/runs/${res.data.id}`);
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.detail || err?.message || "Failed to start run.";
+      setRunError(msg);
     },
   });
 
@@ -84,7 +98,12 @@ const ProjectDetailPage = () => {
     mutationFn: (data: Record<string, unknown>) => updateProject(projectId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      setSettingsError(null);
       setEditMode(false);
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.detail || err?.message || "Failed to save settings.";
+      setSettingsError(msg);
     },
   });
 
@@ -326,9 +345,10 @@ const ProjectDetailPage = () => {
                     </span>
                   </div>
                   <p className="text-xs text-gray-500 dark:text-slate-500 mt-0.5">
-                    {new Date(run.created_at).toLocaleDateString("en-US", {
+                    {new Date(run.created_at).toLocaleDateString("en-IN", {
                       year: "numeric", month: "short", day: "numeric",
                       hour: "2-digit", minute: "2-digit",
+                      timeZone: "Asia/Kolkata",
                     })}
                   </p>
                 </div>
@@ -359,10 +379,33 @@ const ProjectDetailPage = () => {
                   </p>
                 </div>
               ))}
+
+              {/* Page Pairs */}
+              <div>
+                <p className="text-[10px] font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-widest mb-2">Page Mappings</p>
+                {(project.page_pairs ?? []).length === 0 ? (
+                  <p className="text-sm text-gray-400 dark:text-slate-600 italic">No pages configured — full site discovery on run</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    <div className="grid grid-cols-2 gap-2 mb-1">
+                      <span className="text-[10px] font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wide">Reference Path</span>
+                      <span className="text-[10px] font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wide">Shopify Path</span>
+                    </div>
+                    {(project.page_pairs ?? []).map((pair, i) => (
+                      <div key={i} className="grid grid-cols-2 gap-2 px-3 py-2 bg-gray-50 dark:bg-slate-800/60 rounded-lg text-sm font-mono">
+                        <span className="text-gray-700 dark:text-slate-300 truncate">{pair.source_path}</span>
+                        <span className="text-gray-700 dark:text-slate-300 truncate">{pair.shopify_path}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="pt-2 border-t border-gray-200 dark:border-slate-700/50">
                 <button
                   onClick={() => {
                     setSettingsForm({ shopify_url: project.shopify_url, source_url: project.source_url });
+                    setLocalPairs(project.page_pairs ?? []);
                     setEditMode(true);
                   }}
                   className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-violet-400 border border-violet-500/30 rounded-xl bg-violet-500/10 hover:bg-violet-500/20 transition-colors"
@@ -378,7 +421,7 @@ const ProjectDetailPage = () => {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                updateMutation.mutate(settingsForm as Record<string, unknown>);
+                updateMutation.mutate({ ...settingsForm, page_pairs: localPairs } as Record<string, unknown>);
               }}
               className="bg-white dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700/60 rounded-2xl p-6 space-y-5"
             >
@@ -400,6 +443,72 @@ const ProjectDetailPage = () => {
                   className="w-full px-3.5 py-2.5 border border-gray-300 dark:border-slate-700 rounded-xl text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-slate-500 bg-white dark:bg-slate-800/60 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 transition-all"
                 />
               </div>
+
+              {/* Page Pairs Editor */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300">Page Mappings</label>
+                  <button
+                    type="button"
+                    onClick={() => setLocalPairs((prev) => [...prev, { source_path: "/", shopify_path: "/" }])}
+                    className="flex items-center gap-1 text-xs font-medium text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    Add Page
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 dark:text-slate-500">Map reference pages to Shopify pages for design comparison.</p>
+                {localPairs.length === 0 ? (
+                  <p className="text-xs text-gray-400 dark:text-slate-500 italic px-1">No pages added — full site discovery will run automatically.</p>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-[1fr_1fr_auto] gap-2 px-1">
+                      <span className="text-[10px] font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wide">Reference Path</span>
+                      <span className="text-[10px] font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wide">Shopify Path</span>
+                      <span />
+                    </div>
+                    {localPairs.map((pair, i) => (
+                      <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
+                        <input
+                          type="text"
+                          value={pair.source_path}
+                          onChange={(e) => setLocalPairs((prev) => prev.map((p, idx) => idx === i ? { ...p, source_path: e.target.value } : p))}
+                          placeholder="/about"
+                          className="px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-lg text-sm font-mono text-gray-900 dark:text-white bg-white dark:bg-slate-800/60 focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 transition-all"
+                        />
+                        <input
+                          type="text"
+                          value={pair.shopify_path}
+                          onChange={(e) => setLocalPairs((prev) => prev.map((p, idx) => idx === i ? { ...p, shopify_path: e.target.value } : p))}
+                          placeholder="/pages/about"
+                          className="px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-lg text-sm font-mono text-gray-900 dark:text-white bg-white dark:bg-slate-800/60 focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 transition-all"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setLocalPairs((prev) => prev.filter((_, idx) => idx !== i))}
+                          className="p-1.5 text-gray-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400 transition-colors rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10"
+                          aria-label="Remove page"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {settingsError && (
+                <div className="flex items-center gap-2 px-3 py-2.5 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl text-sm text-red-700 dark:text-red-400">
+                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  </svg>
+                  {settingsError}
+                </div>
+              )}
               <div className="flex gap-3 pt-1">
                 <button
                   type="submit"
@@ -415,7 +524,12 @@ const ProjectDetailPage = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setEditMode(false)}
+                  onClick={() => {
+                    setEditMode(false);
+                    setSettingsForm({});
+                    setLocalPairs([]);
+                    setSettingsError(null);
+                  }}
                   className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-100 hover:text-gray-900 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700/50 dark:hover:text-white transition-colors"
                 >
                   Cancel
@@ -426,14 +540,32 @@ const ProjectDetailPage = () => {
         </div>
       )}
 
+      {/* Run error inline display */}
+      {runError && (
+        <div className="flex items-center gap-2 px-4 py-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-2xl text-sm text-red-700 dark:text-red-400">
+          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          </svg>
+          <span className="flex-1">{runError}</span>
+          <button onClick={() => setRunError(null)} className="text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Run QA Modal */}
       {showRunModal && (
         <RunQAModal
-          onConfirm={(pages, testMode, testTypes) =>
-            runMutation.mutate({ pages, testMode, testTypes })
+          onConfirm={(pages, testMode, testTypes, referenceUrls) =>
+            runMutation.mutate({ pages, testMode, testTypes, referenceUrls })
           }
           onCancel={() => setShowRunModal(false)}
           isLoading={runMutation.isPending}
+          hasDesignSource={!!(project?.source_url && project.source_type !== "none")}
+          shopifyUrl={project?.shopify_url}
+          referenceUrl={project?.source_url}
         />
       )}
     </div>

@@ -25,7 +25,13 @@ class Comparison(Base):
     qa_run_id: Mapped[int] = mapped_column(ForeignKey("qa_runs.id"), nullable=False)
     page: Mapped[str] = mapped_column(String(512), nullable=False)
     breakpoint: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Visual similarity score (SSIM, 0.0–1.0)
     ssim_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # DOM / style similarity score (0.0–100.0)
+    dom_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     diff_image_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     heatmap_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     ai_analysis_status: Mapped[AiAnalysisStatus] = mapped_column(

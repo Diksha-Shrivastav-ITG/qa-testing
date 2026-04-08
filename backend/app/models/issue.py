@@ -47,7 +47,7 @@ class Issue(Base):
     )
     description: Mapped[str] = mapped_column(Text, nullable=False)
     ai_suggestion: Mapped[str | None] = mapped_column(Text, nullable=True)
-    element_selector: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    element_selector: Mapped[str | None] = mapped_column(Text, nullable=True)
     location_x: Mapped[int | None] = mapped_column(Integer, nullable=True)
     location_y: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[IssueStatus] = mapped_column(
@@ -55,7 +55,7 @@ class Issue(Base):
         nullable=False,
         default=IssueStatus.open,
     )
-    screenshot_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    screenshot_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     original_issue_id: Mapped[int | None] = mapped_column(
         ForeignKey("issues.id"), nullable=True
     )

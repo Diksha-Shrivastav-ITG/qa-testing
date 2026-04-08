@@ -11,6 +11,7 @@ interface Run {
   project_id?: number;
   started_at: string;
   run_number?: number;
+  test_types?: string | null;
 }
 
 const STATUS_CONFIG: Record<string, { dot: string; bg: string; text: string; label: string }> = {
@@ -51,10 +52,21 @@ const RunDetailPage = () => {
   const handleDownload = (format: "pdf" | "html") => {
     const token = localStorage.getItem("token");
     const endpoint = format === "pdf" ? "pdf" : "html";
-    const url = `/api/runs/${runId}/report/${endpoint}${
-      token ? `?token=${encodeURIComponent(token)}` : ""
-    }`;
-    window.open(url, "_blank");
+    const url = `/api/runs/${runId}/report/${endpoint}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+    fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.blob();
+      })
+      .then((blob) => {
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = objectUrl;
+        a.download = `run-${runId}-report.${format}`;
+        a.click();
+        URL.revokeObjectURL(objectUrl);
+      })
+      .catch(() => {});
   };
 
   if (isLoading) {
@@ -78,13 +90,13 @@ const RunDetailPage = () => {
         </div>
         <p className="text-red-400 font-medium">Run not found or failed to load.</p>
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => navigate("/projects")}
           className="text-sm text-violet-400 hover:text-violet-300 flex items-center gap-1.5 transition-colors"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
           </svg>
-          Go back
+          Back to Projects
         </button>
       </div>
     );
@@ -100,8 +112,8 @@ const RunDetailPage = () => {
       <div className="flex items-start justify-between gap-4">
         <div>
           <button
-            onClick={() => navigate(-1)}
-            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 dark:text-slate-500 dark:hover:text-slate-300 mb-3 transition-colors group"
+            onClick={() => run?.project_id ? navigate(`/projects/${run.project_id}`) : navigate("/projects")}
+            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 dark:text-slate-200 dark:hover:text-slate-300 mb-3 transition-colors group"
           >
             <svg className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
@@ -121,12 +133,13 @@ const RunDetailPage = () => {
 
           <p className="text-sm text-gray-600 dark:text-slate-500">
             Started{" "}
-            {new Date(run.started_at).toLocaleDateString("en-US", {
+            {new Date(run.started_at).toLocaleDateString("en-IN", {
               year: "numeric",
               month: "short",
               day: "numeric",
               hour: "2-digit",
               minute: "2-digit",
+              timeZone: "Asia/Kolkata",
             })}
           </p>
         </div>
@@ -167,8 +180,8 @@ const RunDetailPage = () => {
       </div>
 
       {/* Content */}
-      {isRunning && <RunProgress runId={runId} />}
-      {isTerminal && <RunResults runId={runId} />}
+      {isRunning && <RunProgress runId={runId} testTypes={run?.test_types} />}
+      {isTerminal && run.status !== "cancelled" && <RunResults runId={runId} />}
 
       {/* Cancelled state */}
       {run.status === "cancelled" && (

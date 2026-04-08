@@ -2,6 +2,7 @@ import { useSSE } from "../../hooks/useSSE";
 
 interface RunProgressProps {
   runId: number;
+  testTypes?: string | null; // comma-separated; null/undefined = all tests
 }
 
 const STEP_ICONS: Record<string, string> = {
@@ -16,13 +17,30 @@ const STEP_ICONS: Record<string, string> = {
   completed:    "M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
 };
 
-const STEPS_ORDER = ["discovery", "capture", "compare", "functional", "accessibility", "link_audit", "matching", "scoring", "completed"];
+const ALL_STEPS = ["discovery", "capture", "compare", "functional", "accessibility", "link_audit", "matching", "scoring", "completed"];
+
+// Which pipeline steps require a specific test type to be selected
+const STEP_REQUIRES: Record<string, string> = {
+  compare:       "qa",
+  functional:    "functional",
+  accessibility: "ada",
+  link_audit:    "link_audit",
+};
+
+function buildStepsOrder(testTypes: string | null | undefined): string[] {
+  if (!testTypes) return ALL_STEPS; // null / undefined = all tests
+  const selected = new Set(testTypes.split(",").map((s) => s.trim()));
+  return ALL_STEPS.filter((step) => {
+    const required = STEP_REQUIRES[step];
+    return !required || selected.has(required);
+  });
+}
 
 const stepLabel = (step: string): string => {
   const labels: Record<string, string> = {
     discovery:    "Discovering pages",
     capture:      "Capturing screenshots",
-    compare:      "Comparing designs (AI analysis)",
+    compare:      "Comparing designs",
     functional:   "Running functional tests",
     accessibility:"ADA compliance checks",
     link_audit:   "Link & button audit",
@@ -35,8 +53,10 @@ const stepLabel = (step: string): string => {
   return labels[step] ?? step.charAt(0).toUpperCase() + step.slice(1).replace(/_/g, " ");
 };
 
-const RunProgress = ({ runId }: RunProgressProps) => {
+const RunProgress = ({ runId, testTypes }: RunProgressProps) => {
   const { progress, isComplete, error } = useSSE(runId);
+
+  const STEPS_ORDER = buildStepsOrder(testTypes);
 
   const pct = progress?.progress ?? 0;
   const isFailed = progress?.step === "failed";
@@ -158,7 +178,7 @@ const RunProgress = ({ runId }: RunProgressProps) => {
                   )}
                 </div>
                 <span className={`text-xs font-medium ${
-                  isCurrent ? "text-violet-600 dark:text-violet-300" : isDone ? "text-gray-500 dark:text-slate-400" : "text-gray-300 dark:text-slate-600"
+                  isCurrent ? "text-violet-600 dark:text-violet-300" : isDone ? "text-gray-500 dark:text-slate-400" : "text-gray-600 dark:text-slate-200"
                 }`}>
                   {stepLabel(step)}
                 </span>

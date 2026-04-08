@@ -4,10 +4,15 @@ import { useAuth } from "../../hooks/useAuth";
 import { useTheme } from "../../hooks/useTheme";
 import { getMe } from "../../api/auth";
 
-const Sidebar = () => {
+interface SidebarProps {
+  onClose?: () => void;
+}
+
+const Sidebar = ({ onClose }: SidebarProps) => {
   const { role, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
-  const roleLabel = role === "admin" ? "Administrator" : "Developer";
+  const ROLE_LABELS: Record<string, string> = { admin: "Administrator", developer: "Developer", pm: "Product Manager" };
+  const roleLabel = (role && ROLE_LABELS[role]) ?? (role ? role.charAt(0).toUpperCase() + role.slice(1) : "User");
 
   const { data: me } = useQuery({
     queryKey: ["me"],
@@ -22,14 +27,8 @@ const Sidebar = () => {
       {/* Logo */}
       <div className="px-5 py-5 border-b border-gray-200 dark:border-white/10">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/25 shrink-0">
-            <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7L12 2z" fill="currentColor" fillOpacity="0.25" />
-              <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7L12 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-              <path d="M8.5 12l2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <h1 className="text-base font-bold text-gray-900 dark:text-white tracking-tight">Auditable</h1>
+          <img src="/logo.png" alt="Auditable ITG" className="h-7 w-auto shrink-0" />
+          <h1 className="text-base font-bold text-gray-900 dark:text-white tracking-tight">Auditable ITG</h1>
         </div>
       </div>
 
@@ -40,6 +39,7 @@ const Sidebar = () => {
         <NavLink
           to="/"
           end
+          onClick={onClose}
           className={({ isActive }) =>
             `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
               isActive
@@ -56,6 +56,7 @@ const Sidebar = () => {
 
         <NavLink
           to="/projects"
+          onClick={onClose}
           className={({ isActive }) =>
             `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
               isActive
@@ -75,6 +76,7 @@ const Sidebar = () => {
             <p className="px-3 mt-5 mb-2 text-[10px] font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-widest">Admin</p>
             <NavLink
               to="/admin/users"
+              onClick={onClose}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
                   isActive
@@ -108,7 +110,7 @@ const Sidebar = () => {
             </>
           ) : (
             <>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
               </svg>
               <span>Dark Mode</span>

@@ -147,7 +147,7 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
 
     project_name = project.name if project else "Unknown Project"
     shopify_url = project.shopify_url if project else "N/A"
-    source_type = (project.source_type.value.title() if hasattr(project.source_type, "value") else str(project.source_type)) if project else "N/A"
+    source_type = str(project.source_type).title() if project else "N/A"
     source_url = project.source_url if project and project.source_url else "N/A (AI testing only)"
     test_mode = getattr(run, "test_mode", "design") or "design"
     run_date = _fmt_date(run.started_at)
@@ -192,10 +192,10 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
                     shopify_url_bp = cap_index.get((page, bp_int, "shopify"))
                     comp = comp_index.get((page, bp_int))
                     heatmap_url = _storage_to_url(comp.heatmap_path if comp else None, storage_base)
-                    ssim = f"{comp.ssim_score:.3f}" if comp and comp.ssim_score is not None else None
+                    visual_score_pct = f"{comp.ssim_score * 100:.1f}%" if comp and comp.ssim_score is not None else None
 
                     if design_url or shopify_url_bp:
-                        ssim_badge = f'<span class="ssim-badge">Similarity: {ssim}</span>' if ssim else ""
+                        ssim_badge = f'<span class="ssim-badge">Visual Score: {visual_score_pct}</span>' if visual_score_pct else ""
                         issue_items_html += f"""
                         <div class="screenshot-row">
                           {f'<div class="ss-block"><p class="ss-label">DESIGN (Source)</p><img src="{design_url}" class="ss-img"/></div>' if design_url else ''}
@@ -723,12 +723,24 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
     return html
 
 
-def generate_pdf_report(db: Session, run_id: int) -> bytes:
-    """Generate a PDF report using WeasyPrint."""
-    try:
-        from weasyprint import HTML  # type: ignore[import]
-    except ImportError as exc:
-        raise ImportError("WeasyPrint is required for PDF generation.") from exc
+async def generate_pdf_report(db: Session, run_id: int) -> bytes:
+    """Generate a PDF report using Playwright (Chromium headless)."""
+    from playwright.async_api import async_playwright
+
     html_content = generate_html_report(db, run_id)
-    pdf_bytes: bytes = HTML(string=html_content, base_url=None).write_pdf()
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        )
+        page = await browser.new_page()
+        await page.set_content(html_content, wait_until="networkidle")
+        pdf_bytes: bytes = await page.pdf(
+            format="A4",
+            print_background=True,
+            margin={"top": "20mm", "bottom": "20mm", "left": "15mm", "right": "15mm"},
+        )
+        await browser.close()
+
     return pdf_bytes

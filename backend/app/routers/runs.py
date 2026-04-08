@@ -32,12 +32,13 @@ def _dispatch_qa_task(
     partial_pages: Optional[list[str]] = None,
     test_mode: str = "design",
     test_types: Optional[list[str]] = None,
+    reference_urls_override: Optional[list[str]] = None,
 ) -> None:
     """Dispatch the Celery QA task. Silently swallows errors (e.g. no broker)."""
     try:
         from app.workers.qa_tasks import run_qa_job
 
-        run_qa_job.delay(run_id, partial_pages, test_mode, test_types)
+        run_qa_job.delay(run_id, partial_pages, test_mode, test_types, reference_urls_override)
     except Exception:
         pass
 
@@ -73,6 +74,7 @@ def start_run(
     project_id: int,
     partial: bool = Query(default=False),
     pages: Optional[str] = Query(default=None, description="Comma-separated page slugs"),
+    reference_urls: Optional[str] = Query(default=None, description="Comma-separated reference URLs, positionally matching 'pages'"),
     test_mode: str = Query(default="design", description="'design' = compare vs Framer/Figma, 'ai' = AI-only analysis"),
     test_types: Optional[list[str]] = Query(default=None, description="Which test phases to run: qa, functional, ada, seo, performance"),
     db: Session = Depends(get_db),
@@ -108,7 +110,8 @@ def start_run(
 
     # Dispatch Celery task to execute the QA run asynchronously
     partial_pages = [p.strip() for p in pages.split(",") if p.strip()] if pages else None
-    _dispatch_qa_task(run.id, partial_pages, test_mode, test_types)
+    ref_urls_list = [u.strip() for u in reference_urls.split(",") if u.strip()] if reference_urls else None
+    _dispatch_qa_task(run.id, partial_pages, test_mode, test_types, ref_urls_list)
 
     return run  # type: ignore[return-value]
 
@@ -492,7 +495,7 @@ async def generate_fix_prompt(
     db: Session = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ) -> dict:
-    """Use Groq AI to generate a Claude Code fix prompt from selected issues."""
+    """Use AWS Bedrock to generate a Claude Code fix prompt from selected issues."""
     from app.config import settings
     from app.models.accessibility_result import AccessibilityResult
 
@@ -523,8 +526,8 @@ async def generate_fix_prompt(
                 acc_text += f"\n   WCAG: {a.wcag}"
             acc_text += f"\n   Page: {a.page}"
 
-    # Build the prompt for Groq
-    groq_prompt = f"""You are an expert Shopify theme developer. A QA team has found issues on a Shopify store and needs you to generate a detailed, actionable prompt that another AI developer (Claude Code / VS Code Claude) can use to fix ALL the issues.
+    # Build the prompt
+    groq_prompt = f"""You are a senior QA engineer writing a developer brief for a Shopify project. Based on the issues listed below, produce a professional, clear prompt that a developer can paste directly into Claude Code to fix all the issues.
 
 Store: {body.shopify_url or "Shopify store"}
 Project: {body.project_name or "QA Project"}
@@ -535,31 +538,46 @@ Project: {body.project_name or "QA Project"}
 === ACCESSIBILITY ISSUES ===
 {acc_text if acc_text else "(none)"}
 
-Generate a comprehensive prompt that:
-1. Lists every issue with the EXACT file to edit (e.g., sections/header.liquid, assets/theme.css)
-2. Provides specific CSS/Liquid/JS code fixes for each issue
-3. Groups fixes by file so the developer can work file-by-file
-4. Includes before/after examples where helpful
-5. Prioritizes critical issues first
-6. Warns about potential side effects of each fix
+Write the output as a ready-to-paste developer prompt following these rules:
 
-Format the output as a ready-to-paste prompt for Claude Code. Start with a clear instruction line, then list all fixes. Use markdown formatting.
+1. Open with a single clear instruction sentence that tells Claude Code what it needs to do and which store/project it is working on.
+2. Group issues by page. For each page, list each issue as a numbered item.
+3. For every issue, describe in plain English:
+   - What is wrong or missing (the problem)
+   - Where it appears (page, section, or UI element — no raw CSS selectors)
+   - What the correct behaviour or appearance should be
+   - The priority (Critical / Major / Minor)
+4. For accessibility issues, also state the relevant WCAG criterion and what conformance requires.
+5. Close with a short paragraph instructing Claude Code to: read the relevant theme files, understand the existing implementation, then apply the minimal changes needed to resolve each issue — and to confirm what it changed and why.
 
-IMPORTANT: The prompt should be self-contained — the developer should be able to paste it directly into Claude Code and get all issues fixed without needing additional context."""
+Do NOT include raw CSS properties, Liquid snippets, JavaScript, hex colours, or any code in the prompt. The prompt must be entirely in plain English prose and numbered lists. Claude Code will determine the implementation details itself.
 
-    # Call Groq AI
+Use clean markdown formatting (headings, numbered lists). The tone should be professional and precise."""
+
+    # Call AWS Bedrock Nova Pro for prompt generation
     try:
-        from groq import AsyncGroq
+        import asyncio
+        import boto3
 
-        client = AsyncGroq(api_key=settings.groq_api_key)
-        response = await client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[{"role": "user", "content": groq_prompt}],
-            temperature=0.3,
-            max_tokens=4096,
+        bedrock = boto3.client(
+            "bedrock-runtime",
+            region_name=settings.aws_region,
+            aws_access_key_id=settings.aws_access_key,
+            aws_secret_access_key=settings.aws_bedrock_secret_key,
         )
-        ai_prompt = response.choices[0].message.content.strip()
-    except Exception as exc:
+        bedrock_messages = [{"role": "user", "content": [{"text": groq_prompt}]}]
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: bedrock.converse(
+                modelId=settings.bedrock_model_id,
+                messages=bedrock_messages,
+                inferenceConfig={"maxTokens": 4096, "temperature": 0.3},
+            ),
+        )
+        content_blocks = response["output"]["message"]["content"]
+        ai_prompt = "".join(block.get("text", "") for block in content_blocks).strip()
+    except Exception:
         # Fallback: generate a basic prompt without AI
         ai_prompt = _fallback_prompt(body, issues_text, acc_text)
 
@@ -567,11 +585,18 @@ IMPORTANT: The prompt should be self-contained — the developer should be able 
 
 
 def _fallback_prompt(body: PromptGenerateRequest, issues_text: str, acc_text: str) -> str:
-    """Generate a basic prompt without AI if Groq fails."""
-    prompt = f"Fix the following QA issues on my Shopify store ({body.shopify_url or 'my store'}):\n"
+    """Generate a structured plain-English prompt without AI if Bedrock is unavailable."""
+    store = body.shopify_url or "the Shopify store"
+    project = body.project_name or "this project"
+    prompt = (
+        f"You are working on {project} ({store}). "
+        f"The QA team has identified the following issues that need to be resolved. "
+        f"Please read the relevant theme files, understand the existing implementation, "
+        f"then apply the minimal changes needed to fix each issue. "
+        f"Confirm what you changed and why after completing the fixes.\n"
+    )
     if issues_text:
         prompt += f"\n## QA Issues\n{issues_text}\n"
     if acc_text:
         prompt += f"\n## Accessibility Issues\n{acc_text}\n"
-    prompt += "\nFor each issue, find the relevant Liquid/CSS/JS file and apply the fix. Explain what you changed and why."
     return prompt

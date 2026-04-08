@@ -65,20 +65,23 @@ const DashboardPage = () => {
   });
 
   const { data: recentRuns } = useQuery<Run[]>({
-    queryKey: ["recentRuns"],
+    queryKey: ["recentRuns", projectsData?.items?.map((p: Project) => p.id)],
     queryFn: async () => {
       const projects: Project[] = projectsData?.items ?? [];
       if (projects.length === 0) return [];
-      const allRuns: Run[] = [];
-      for (const p of projects.slice(0, 10)) {
-        try {
-          const res = await api.get(`/api/projects/${p.id}/runs?page=1&per_page=5`);
-          const runs = (res.data?.items ?? []).map((r: Run) => ({ ...r, _projectName: p.name }));
-          allRuns.push(...runs);
-        } catch { /* skip */ }
-      }
-      return allRuns
-        .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
+      const results = await Promise.all(
+        projects.slice(0, 10).map((p: Project) =>
+          api
+            .get(`/api/projects/${p.id}/runs?page=1&per_page=5`)
+            .then((res: { data: { items?: Run[] } }) =>
+              (res.data?.items ?? []).map((r: Run) => ({ ...r, _projectName: p.name }))
+            )
+            .catch(() => [] as Run[])
+        )
+      );
+      return results
+        .flat()
+        .sort((a: Run, b: Run) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
         .slice(0, 10);
     },
     enabled: !!(projectsData?.items?.length),
@@ -92,7 +95,7 @@ const DashboardPage = () => {
   const { data: issuesData } = useQuery<Issue[]>({
     queryKey: ["latestIssues", latestCompletedRun?.id],
     queryFn: async () => {
-      const res = await api.get(`/api/runs/${latestCompletedRun!.id}/issues`);
+      const res = await api.get(`/api/runs/${latestCompletedRun?.id}/issues`);
       return res.data?.items ?? res.data ?? [];
     },
     enabled: !!latestCompletedRun?.id,
@@ -125,8 +128,9 @@ const DashboardPage = () => {
         <div>
           <h1 className="text-2xl font-semibold text-violet-600 dark:text-violet-400 mb-0.5">{greeting}!</h1>
           <p className="text-sm text-gray-500 dark:text-slate-500 mt-0.5">
-            {new Date().toLocaleDateString("en-US", {
+            {new Date().toLocaleDateString("en-IN", {
               weekday: "long", year: "numeric", month: "long", day: "numeric",
+              timeZone: "Asia/Kolkata",
             })}
           </p>
         </div>
@@ -183,17 +187,17 @@ const DashboardPage = () => {
           {latestCompletedRun && totalIssues > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5">
               {criticalCount > 0 && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400">
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-red-500" />{criticalCount} critical
                 </span>
               )}
               {majorCount > 0 && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />{majorCount} major
                 </span>
               )}
               {minorCount > 0 && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400">
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-700 dark:text-blue-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />{minorCount} minor
                 </span>
               )}
@@ -277,7 +281,7 @@ const DashboardPage = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75z" />
                   </svg>
                 </div>
-                <p className="text-sm font-medium text-slate-300">No runs yet</p>
+                <p className="text-sm font-medium text-gray-500 dark:text-slate-400">No runs yet</p>
                 <p className="text-xs text-gray-500 dark:text-slate-500 mt-1">Create a project and start your first QA run</p>
                 <button
                   onClick={() => navigate("/projects")}
@@ -335,8 +339,9 @@ const DashboardPage = () => {
                         <span className="text-xs text-gray-500 dark:text-slate-500 shrink-0">#{run.run_number ?? run.id}</span>
                       </div>
                       <p className="text-xs text-gray-500 dark:text-slate-500 mt-0.5">
-                        {new Date(run.started_at).toLocaleDateString("en-US", {
+                        {new Date(run.started_at).toLocaleDateString("en-IN", {
                           month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                          timeZone: "Asia/Kolkata",
                         })}
                       </p>
                     </div>

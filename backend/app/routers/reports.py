@@ -45,17 +45,18 @@ def get_html_report(
     return HTMLResponse(content=html)
 
 
-@router.get(
-    "/api/runs/{run_id}/report/pdf",
-    response_class=HTMLResponse,
-)
-def get_pdf_report(
+@router.get("/api/runs/{run_id}/report/pdf")
+async def get_pdf_report(
     run_id: int,
     token: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
-) -> HTMLResponse:
-    """Return HTML report with auto-print triggered for PDF saving."""
+) -> Response:
+    """Return a real PDF report for the given run."""
     _require_token(token)
     _get_run_or_404(db, run_id)
-    html = generate_html_report(db, run_id, auto_print=True)
-    return HTMLResponse(content=html)
+    pdf_bytes = await generate_pdf_report(db, run_id)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=\"run-{run_id}-report.pdf\""},
+    )

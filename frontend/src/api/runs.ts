@@ -4,7 +4,8 @@ export const startRun = (
   projectId: number,
   pages?: string,
   testMode: "design" | "ai" = "design",
-  testTypes?: string[]
+  testTypes?: string[],
+  referenceUrls?: string,
 ) => {
   const params = new URLSearchParams();
   if (pages) params.set("pages", pages);
@@ -12,6 +13,7 @@ export const startRun = (
   if (testTypes && testTypes.length > 0) {
     testTypes.forEach((t) => params.append("test_types", t));
   }
+  if (referenceUrls) params.set("reference_urls", referenceUrls);
   const qs = params.toString() ? `?${params.toString()}` : "";
   return api.post(`/api/projects/${projectId}/runs${qs}`);
 };

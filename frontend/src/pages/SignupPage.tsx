@@ -28,12 +28,8 @@ const SignupPage = () => {
 
         {/* Logo */}
         <div className="relative flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-violet-400 to-indigo-500 flex items-center justify-center shadow-xl shadow-violet-900/50">
-            <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-            </svg>
-          </div>
-          <span className="text-lg font-bold text-white tracking-tight">Auditable</span>
+          <img src="/logo.png" alt="Auditable ITG" className="h-8 w-auto brightness-0 invert" />
+          <span className="text-lg font-bold text-white tracking-tight">Auditable ITG</span>
         </div>
 
         {/* Hero copy */}
@@ -85,12 +81,8 @@ const SignupPage = () => {
         <div className="relative w-full max-w-md">
           {/* Mobile logo */}
           <div className="lg:hidden flex items-center gap-2 mb-8">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center">
-              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-              </svg>
-            </div>
-            <span className="font-bold text-gray-900 dark:text-white">Auditable</span>
+            <img src="/logo.png" alt="Auditable ITG" className="h-7 w-auto" />
+            <span className="font-bold text-gray-900 dark:text-white">Auditable ITG</span>
           </div>
 
           <div className="mb-8">

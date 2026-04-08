@@ -24,6 +24,8 @@ export const useSSE = (runId: number | null): UseSSEResult => {
   const [error, setError] = useState<string | null>(null);
   const reconnectCount = useRef(0);
   const esRef = useRef<EventSource | null>(null);
+  // Use a ref to avoid stale closure in onerror callback
+  const isCompleteRef = useRef(false);
 
   useEffect(() => {
     if (runId === null) return;
@@ -45,6 +47,7 @@ export const useSSE = (runId: number | null): UseSSEResult => {
           setProgress(data);
           reconnectCount.current = 0; // reset on successful message
           if (TERMINAL_STEPS.includes(data.step)) {
+            isCompleteRef.current = true;
             setIsComplete(true);
             es.close();
           }
@@ -58,7 +61,7 @@ export const useSSE = (runId: number | null): UseSSEResult => {
         if (cancelled) return;
 
         // Auto-reconnect unless we've hit the limit or already complete
-        if (reconnectCount.current < MAX_RECONNECTS && !isComplete) {
+        if (reconnectCount.current < MAX_RECONNECTS && !isCompleteRef.current) {
           reconnectCount.current++;
           setTimeout(connect, RECONNECT_DELAY_MS);
         } else {

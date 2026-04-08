@@ -12,6 +12,7 @@ interface Project {
   name: string;
   shopify_url: string;
   source_type: string;
+  source_url?: string;
 }
 
 interface ProjectFormData {
@@ -42,12 +43,19 @@ const ProjectsPage = () => {
     },
   });
 
+  const [runError, setRunError] = useState<string | null>(null);
+
   const runMutation = useMutation({
-    mutationFn: ({ projectId, pages, testMode, testTypes }: { projectId: number; pages?: string; testMode?: "design" | "ai"; testTypes?: string[] }) =>
-      startRun(projectId, pages || undefined, testMode || "design", testTypes),
+    mutationFn: ({ projectId, pages, testMode, testTypes, referenceUrls }: { projectId: number; pages?: string; testMode?: "design" | "ai"; testTypes?: string[]; referenceUrls?: string }) =>
+      startRun(projectId, pages || undefined, testMode || "design", testTypes, referenceUrls),
     onSuccess: (res) => {
       setRunModalProjectId(null);
+      setRunError(null);
       navigate(`/runs/${res.data.id}`);
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.detail || err?.message || "Failed to start run.";
+      setRunError(msg);
     },
   });
 
@@ -131,6 +139,21 @@ const ProjectsPage = () => {
         </div>
       )}
 
+      {/* Run error banner */}
+      {runError && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-2xl text-sm text-red-700 dark:text-red-400">
+          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          </svg>
+          <span className="flex-1">{runError}</span>
+          <button onClick={() => setRunError(null)} className="text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Project form modal */}
       {showForm && (
         <ProjectForm
@@ -141,15 +164,21 @@ const ProjectsPage = () => {
       )}
 
       {/* Run QA modal */}
-      {runModalProjectId !== null && (
-        <RunQAModal
-          onConfirm={(pages, testMode, testTypes) =>
-            runMutation.mutate({ projectId: runModalProjectId, pages, testMode, testTypes })
-          }
-          onCancel={() => setRunModalProjectId(null)}
-          isLoading={runMutation.isPending}
-        />
-      )}
+      {runModalProjectId !== null && (() => {
+        const modalProject = projects.find((p) => p.id === runModalProjectId);
+        return (
+          <RunQAModal
+            onConfirm={(pages, testMode, testTypes, referenceUrls) =>
+              runMutation.mutate({ projectId: runModalProjectId, pages, testMode, testTypes, referenceUrls })
+            }
+            onCancel={() => { setRunModalProjectId(null); setRunError(null); }}
+            isLoading={runMutation.isPending}
+            hasDesignSource={!!(modalProject?.source_url && modalProject?.source_type !== "none")}
+            shopifyUrl={modalProject?.shopify_url}
+            referenceUrl={modalProject?.source_url}
+          />
+        );
+      })()}
     </div>
   );
 };

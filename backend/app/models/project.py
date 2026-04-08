@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, Enum, Float, ForeignKey, String, func
+from sqlalchemy import JSON, Float, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -13,10 +12,30 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class SourceType(str, enum.Enum):
+class SourceType:
+    """String constants for project source_type.
+
+    Replaces the old PostgreSQL ENUM so any platform URL is supported.
+    Usage: project.source_type == SourceType.figma
+    """
+
     framer = "framer"
     figma = "figma"
     none = "none"
+    url = "url"           # Generic web URL (Vercel, Webflow, static site, etc.)
+    webflow = "webflow"
+    vercel = "vercel"
+    shopify_preview = "shopify_preview"
+
+    @classmethod
+    def is_web_capturable(cls, value: str) -> bool:
+        """Return True if this source type is captured via Playwright screenshot."""
+        return value in (cls.framer, cls.url, cls.webflow, cls.vercel, cls.shopify_preview)
+
+    @classmethod
+    def requires_api(cls, value: str) -> bool:
+        """Return True if this source type uses a dedicated API (not Playwright)."""
+        return value == cls.figma
 
 
 class Project(Base):
@@ -25,13 +44,12 @@ class Project(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     shopify_url: Mapped[str] = mapped_column(String(512), nullable=False)
-    source_type: Mapped[SourceType] = mapped_column(
-        Enum(SourceType, name="sourcetype"),
-        nullable=False,
-    )
+
+    # Free-form string — accepts any platform identifier (figma/framer/vercel/url/none/…)
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False, default="none")
     source_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
-    # Nullable encrypted credential fields
+    # Nullable credential fields
     shopify_password: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     framer_password: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     figma_token: Mapped[str | None] = mapped_column(String(1024), nullable=True)

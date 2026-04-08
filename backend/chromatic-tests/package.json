@@ -1,0 +1,13 @@
+{
+  "name": "chromatic-visual-tests",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@chromatic-com/playwright": "latest",
+    "@playwright/test": "latest",
+    "chromatic": "latest"
+  }
+}

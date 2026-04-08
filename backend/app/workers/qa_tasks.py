@@ -18,6 +18,24 @@ from app.workers.celery_app import celery_app
 BREAKPOINTS = [375, 768, 1440]  # Mobile, Tablet, Desktop — fast and covers all
 
 
+def _clean_page_name(raw_path: str) -> str:
+    """Convert a raw Shopify path (may include query params) to a clean page slug.
+
+    Examples:
+        "/"                                      → "home"
+        "/collections/summer"                    → "collections/summer"
+        "?_ab=0&preview_theme_id=148090650806"   → "home"
+        "/?_ab=0&preview_theme_id=148090650806"  → "home"
+    """
+    from urllib.parse import urlparse as _up
+    try:
+        parsed = _up(raw_path if raw_path.startswith("http") else f"http://x{raw_path}")
+        clean = parsed.path.strip("/")
+    except Exception:
+        clean = raw_path.strip("/").split("?")[0]
+    return clean or "home"
+
+
 def _build_page_url(base_url: str, path: str) -> str:
     """Build a full URL from a base URL and a path, preserving query params like preview_theme_id."""
     from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
@@ -173,6 +191,7 @@ async def _run_qa_job_async(
     partial_pages: Optional[list[str]] = None,
     test_mode: str = "design",
     test_types: Optional[list[str]] = None,
+    reference_urls_override: Optional[list[str]] = None,
     *,
     _publish_fn=publish_progress,
 ) -> None:
@@ -229,7 +248,25 @@ async def _run_qa_job_async(
         # ---- Phase 1: Discovery ----
         _publish_fn(run_id, "discovery", progress=_overall_progress(done_phases, "discovery", 0), message="Starting discovery")
 
-        page_mappings: dict[str, str] = project.config.get("page_mappings", {})
+        # ── Resolve page mappings ────────────────────────────────────────────
+        # Priority:
+        #   1. Explicit page_pairs stored in project.config (set at project creation)
+        #   2. Cached mappings from a previous discovery run
+        #   3. Auto-discovery (fallback)
+
+        page_mappings: dict[str, str] = {}
+
+        # 1. Explicit page_pairs (platform-independent multi-page support)
+        raw_pairs: list[dict] = project.config.get("page_pairs", [])
+        if raw_pairs:
+            for pair in raw_pairs:
+                sp = pair.get("shopify_path", "/")
+                srcp = pair.get("source_path", "/")
+                page_mappings[sp] = srcp
+
+        # 2. Cached discovery mappings (keyed as "mappings" in config)
+        if not page_mappings:
+            page_mappings = project.config.get("mappings", {})
 
         has_design_source = (
             project.source_url
@@ -248,13 +285,30 @@ async def _run_qa_job_async(
                 source_pages = shopify_pages
             elif project.source_type == SourceType.framer:
                 source_pages = await discovery.discover_framer_pages(project.source_url)
+            elif project.source_type == SourceType.figma:
+                # Figma frames are captured via API; map Shopify paths to themselves
+                source_pages = shopify_pages
             else:
-                source_pages = shopify_pages  # Figma handled differently
+                # Generic web URL (Vercel, Webflow, static site, etc.)
+                # Attempt to crawl the source URL; fall back to Shopify paths
+                try:
+                    source_pages = await discovery.discover_pages(project.source_url)
+                except Exception:
+                    source_pages = shopify_pages
 
             page_mappings = discovery.auto_map(shopify_pages, source_pages)
 
+        # Override page mappings with per-page reference URLs provided at run time
+        # (set when user specifies a Reference URL per page in the Start QA modal)
+        if partial_pages and reference_urls_override and len(reference_urls_override) == len(partial_pages):
+            page_mappings = {
+                path: ref_url
+                for path, ref_url in zip(partial_pages, reference_urls_override)
+                if path.strip()
+            }
+
         # Filter to partial pages if specified
-        if partial_pages:
+        if partial_pages and not reference_urls_override:
             # Known top-level prefixes for "other" filter
             _KNOWN_PREFIXES = ("/collections", "/products")
 
@@ -318,7 +372,7 @@ async def _run_qa_job_async(
                 _publish_fn(run_id, "cancelled", progress=0.0, message="Run cancelled")
                 return
 
-            page_name = shopify_path.strip("/") or "home"
+            page_name = _clean_page_name(shopify_path)
             shopify_url = _build_page_url(project.shopify_url, shopify_path)
 
             if skip_design:
@@ -333,7 +387,11 @@ async def _run_qa_job_async(
                 design_results = []
             else:
                 # Capture Shopify + Design simultaneously
-                source_url = (project.source_url or "").rstrip("/") + source_path
+                # source_path may be a full URL (per-page reference URL override) or a path
+                if source_path.startswith("http://") or source_path.startswith("https://"):
+                    source_url = source_path
+                else:
+                    source_url = (project.source_url or "").rstrip("/") + source_path
                 shopify_results, design_results = await asyncio.gather(
                     capture_engine.capture_page(
                         url=shopify_url,
@@ -378,6 +436,7 @@ async def _run_qa_job_async(
                         "page": page_name,
                         "breakpoint": bp,
                         "shopify_path": sr.image_path,
+                        "shopify_page_url": shopify_url,
                         "design_path": None,
                         "mode": "ai",
                     })
@@ -402,12 +461,24 @@ async def _run_qa_job_async(
                 design_by_bp = {r.breakpoint: r for r in design_results if r.status == "success"}
                 for bp in BREAKPOINTS:
                     if bp in shopify_by_bp and bp in design_by_bp:
+                        # Both captures succeeded — run full design comparison
                         capture_pairs.append({
                             "page": page_name,
                             "breakpoint": bp,
                             "shopify_path": shopify_by_bp[bp].image_path,
+                            "shopify_page_url": shopify_url,
                             "design_path": design_by_bp[bp].image_path,
                             "mode": "design",
+                        })
+                    elif bp in shopify_by_bp:
+                        # Design capture failed — fall back to AI-only for this breakpoint
+                        capture_pairs.append({
+                            "page": page_name,
+                            "breakpoint": bp,
+                            "shopify_path": shopify_by_bp[bp].image_path,
+                            "shopify_page_url": shopify_url,
+                            "design_path": None,
+                            "mode": "ai",
                         })
 
             db.commit()
@@ -415,10 +486,19 @@ async def _run_qa_job_async(
         # ---- Phase 3: Compare ----
         done_phases.append("capture")
         if _should_run("qa", test_types):
+            from app.engines.dom_comparison_engine import DomComparisonEngine
+            from app.engines.dom_extraction_engine import DomExtractionEngine
+
             comparison_engine = ComparisonEngine(
-                groq_api_key=settings.groq_api_key,
+                openai_api_key=settings.openai_api_key,
+                aws_access_key=settings.aws_access_key,
+                aws_bedrock_secret_key=settings.aws_bedrock_secret_key,
+                aws_region=settings.aws_region,
+                bedrock_model_id=settings.bedrock_model_id,
                 storage_path=settings.storage_path,
             )
+            dom_extractor = DomExtractionEngine()
+            dom_comparator = DomComparisonEngine()
             total_comparisons = len(capture_pairs)
 
             _severity_map = {
@@ -429,6 +509,51 @@ async def _run_qa_job_async(
                 "major": IssueSeverity.major,
                 "minor": IssueSeverity.minor,
             }
+
+            # ── Pre-extract DOM profiles once per unique page (not per breakpoint) ──
+            # Only run DOM extraction in design mode (not AI-only)
+            # dom_profiles keyed by (page_name, viewport_width) — one entry per breakpoint
+            # so mobile comparisons use mobile DOM measurements.
+            dom_profiles: dict[tuple, tuple] = {}  # (page, bp) → (dom_result, ref_prof, shop_prof)
+            if not skip_design and has_design_source:
+                _publish_fn(run_id, "compare",
+                            progress=_overall_progress(done_phases, "compare", 0),
+                            message="Extracting DOM style profiles")
+                _dom_sem = asyncio.Semaphore(3)
+
+                async def _extract_dom_pair(shopify_path: str, source_path: str, vp: int) -> tuple:
+                    async with _dom_sem:
+                        pname = shopify_path.strip("/") or "home"
+                        shop_url = _build_page_url(project.shopify_url, shopify_path)
+                        src_url = (project.source_url or "").rstrip("/") + source_path
+                        ref_prof, shop_prof = await asyncio.gather(
+                            dom_extractor.extract(src_url, password=project.framer_password, viewport_width=vp),
+                            dom_extractor.extract(shop_url, password=project.shopify_password, viewport_width=vp),
+                            return_exceptions=True,
+                        )
+                        return pname, vp, ref_prof, shop_prof
+
+                # Extract at each unique breakpoint so responsive layout is measured correctly
+                dom_tasks = [
+                    _extract_dom_pair(sp, srcp, bp)
+                    for sp, srcp in page_mappings.items()
+                    for bp in BREAKPOINTS
+                ]
+                _dom_gather = await asyncio.gather(*dom_tasks, return_exceptions=True)
+                for _dom_result in _dom_gather:
+                    if isinstance(_dom_result, Exception):
+                        continue
+                    try:
+                        pname, vp, ref_prof, shop_prof = _dom_result
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(ref_prof, Exception) or isinstance(shop_prof, Exception):
+                        continue
+                    try:
+                        dom_result = dom_comparator.compare(ref_prof, shop_prof)
+                        dom_profiles[(pname, vp)] = (dom_result, ref_prof, shop_prof)
+                    except Exception:
+                        pass
 
             # Run all breakpoint comparisons concurrently — semaphore caps parallel AI calls
             _compare_sem = asyncio.Semaphore(6)
@@ -466,10 +591,25 @@ async def _run_qa_job_async(
                 if comp_result is None:
                     continue
 
+                # ── Attach DOM score + compute hybrid score ────────────────
+                dom_score_val: float | None = None
+                dom_issues: list = []
+                _dom_key = (pair["page"], pair["breakpoint"])
+                if _dom_key in dom_profiles:
+                    dom_comp_result, _, _ = dom_profiles[_dom_key]
+                    dom_score_val = dom_comp_result.dom_score
+                    dom_issues = dom_comp_result.issues
+                    comp_result.dom_score = dom_score_val
+                    comp_result.hybrid_score = comparison_engine.compute_hybrid_score(
+                        comp_result.ssim_score, dom_score_val
+                    )
+
                 if pair["mode"] == "ai":
                     msg = f"AI analysis of {pair['page']} @{pair['breakpoint']}px"
                 else:
-                    msg = f"Compared {pair['page']} @{pair['breakpoint']}px SSIM={comp_result.ssim_score:.3f}"
+                    dom_info = f" DOM={dom_score_val:.1f}" if dom_score_val is not None else ""
+                    visual_pct = comp_result.ssim_score * 100
+                    msg = f"Compared {pair['page']} @{pair['breakpoint']}px Visual={visual_pct:.1f}% Mismatch={comp_result.mismatch_pct:.1f}%{dom_info}"
 
                 ai_status = AiAnalysisStatus.failed if comp_result.ai_status == "failed" else AiAnalysisStatus.completed
                 db.add(Comparison(
@@ -477,12 +617,41 @@ async def _run_qa_job_async(
                     page=pair["page"],
                     breakpoint=pair["breakpoint"],
                     ssim_score=comp_result.ssim_score,
+                    dom_score=dom_score_val,
                     diff_image_path=comp_result.diff_image_path,
                     heatmap_path=comp_result.heatmap_path,
                     ai_analysis_status=ai_status,
                 ))
 
-                for ai_issue in comp_result.ai_issues:
+                # ── Annotate issues: crop + red-border screenshot per issue ────
+                all_issues_for_pair = list(comp_result.ai_issues) + list(dom_issues)
+                annotated_rel_paths: list[str | None] = [None] * len(all_issues_for_pair)
+                if all_issues_for_pair and pair.get("shopify_page_url"):
+                    try:
+                        from app.engines.issue_annotator import annotate_issues as _annotate
+                        _ann_subdir = os.path.join(
+                            run_dir, "issues", pair["page"], str(pair["breakpoint"])
+                        )
+                        _ann_abs_dir = os.path.join(settings.storage_path, _ann_subdir)
+                        _ann_abs_paths = await _annotate(
+                            shopify_url=pair["shopify_page_url"],
+                            breakpoint=pair["breakpoint"],
+                            issues=all_issues_for_pair,
+                            full_page_path=pair["shopify_path"],
+                            output_dir=_ann_abs_dir,
+                            password=project.shopify_password,
+                        )
+                        # Convert absolute paths → relative paths from storage_path
+                        _storage_base = settings.storage_path.rstrip("/")
+                        for _pi, _ap in enumerate(_ann_abs_paths):
+                            if _ap:
+                                _rel = _ap.replace(_storage_base, "").lstrip("/\\")
+                                annotated_rel_paths[_pi] = _rel
+                    except Exception as _ann_err:
+                        logger.warning("issue_annotator failed: %s", _ann_err)
+
+                # Save AI visual issues (from screenshot comparison)
+                for _ai_idx, ai_issue in enumerate(comp_result.ai_issues):
                     severity_str = ai_issue.get("severity", "minor").lower()
                     severity = _severity_map.get(severity_str, IssueSeverity.minor)
                     element_desc = ai_issue.get("element", "")
@@ -497,9 +666,31 @@ async def _run_qa_job_async(
                         element_selector=element_desc,
                         location_x=None,
                         location_y=None,
-                        screenshot_path=pair["shopify_path"],
+                        screenshot_path=annotated_rel_paths[_ai_idx],
                         status=IssueStatus.open,
                     ))
+
+                # Save DOM style issues (from CSS property comparison) — stored separately
+                _dom_offset = len(comp_result.ai_issues)
+                for _dom_idx, dom_issue in enumerate(dom_issues):
+                    severity_str = dom_issue.get("severity", "minor").lower()
+                    severity = _severity_map.get(severity_str, IssueSeverity.minor)
+                    element_desc = dom_issue.get("element", "")
+                    db.add(Issue(
+                        qa_run_id=run_id,
+                        page=pair["page"],
+                        breakpoint=pair["breakpoint"],
+                        type=IssueType.visual,
+                        severity=severity,
+                        description=dom_issue.get("description", "Style mismatch detected"),
+                        ai_suggestion=dom_issue.get("suggestion"),
+                        element_selector=element_desc,
+                        location_x=None,
+                        location_y=None,
+                        screenshot_path=annotated_rel_paths[_dom_offset + _dom_idx],
+                        status=IssueStatus.open,
+                    ))
+
 
                 db.commit()
                 _publish_fn(run_id, "compare", page=pair["page"],
@@ -511,6 +702,120 @@ async def _run_qa_job_async(
         else:
             done_phases.append("compare")
             _publish_fn(run_id, "compare", progress=_overall_progress(done_phases, "", 0), message="QA test skipped")
+
+        # ---- Phase 3b: Chromatic visual regression ──────────────────────────
+        # Runs in design mode only when a Chromatic project token is configured.
+        if (
+            _should_run("qa", test_types)
+            and has_design_source
+            and test_mode != "ai"
+            and settings.chromatic_project_token
+        ):
+            _publish_fn(run_id, "compare",
+                        progress=_overall_progress(done_phases, "compare", 0),
+                        message="Running Chromatic visual snapshot comparison")
+            try:
+                from app.engines.chromatic_engine import ChromaticEngine
+
+                chromatic = ChromaticEngine(project_token=settings.chromatic_project_token)
+
+                c_paths = list(dict.fromkeys(
+                    (k if k.startswith("/") else f"/{k}") or "/"
+                    for k in page_mappings
+                ))
+
+                c_result = await chromatic.compare(
+                    shopify_url=project.shopify_url,
+                    page_paths=c_paths,
+                    project_name=project.name,
+                )
+
+                if c_result.status in ("passed", "failed"):
+                    _publish_fn(
+                        run_id, "compare",
+                        progress=_overall_progress(done_phases, "compare", 0),
+                        message=(
+                            f"Chromatic: {c_result.snapshot_count} snapshots, "
+                            f"{c_result.change_count} visual change"
+                            f"{'s' if c_result.change_count != 1 else ''}"
+                        ),
+                    )
+
+                    if c_result.change_count > 0:
+                        suggestion = (
+                            f"Review all visual changes in the Chromatic build: {c_result.build_url}"
+                            if c_result.build_url
+                            else "Open your Chromatic dashboard to review visual changes."
+                        )
+                        # One issue per named snapshot with changes
+                        if c_result.snapshots:
+                            for snap in c_result.snapshots:
+                                if snap.status not in ("changed", "error"):
+                                    continue
+                                snap_page = (snap.name.replace(" > ", "/") or "home")[:500]
+                                try:
+                                    db.add(Issue(
+                                        qa_run_id=run_id,
+                                        page=snap_page,
+                                        breakpoint=1440,
+                                        type=IssueType.visual,
+                                        severity=IssueSeverity.major,
+                                        description=(
+                                            f"Chromatic detected visual changes on "
+                                            f"'{snap.name}' snapshot."
+                                        ),
+                                        ai_suggestion=suggestion,
+                                        element_selector=None,
+                                        location_x=None,
+                                        location_y=None,
+                                        screenshot_path=snap.url or None,
+                                        status=IssueStatus.open,
+                                    ))
+                                    db.flush()
+                                except Exception as _snap_exc:
+                                    db.rollback()
+                                    logger.warning(
+                                        "Chromatic: failed to save snapshot issue: %s", _snap_exc
+                                    )
+                        else:
+                            # No per-snapshot data — save a single summary issue
+                            try:
+                                db.add(Issue(
+                                    qa_run_id=run_id,
+                                    page="home",
+                                    breakpoint=1440,
+                                    type=IssueType.visual,
+                                    severity=IssueSeverity.major,
+                                    description=(
+                                        f"Chromatic detected {c_result.change_count} visual "
+                                        f"change{'s' if c_result.change_count != 1 else ''} "
+                                        f"across {c_result.snapshot_count} "
+                                        f"snapshot{'s' if c_result.snapshot_count != 1 else ''}."
+                                    ),
+                                    ai_suggestion=suggestion,
+                                    element_selector=None,
+                                    location_x=None,
+                                    location_y=None,
+                                    screenshot_path=None,
+                                    status=IssueStatus.open,
+                                ))
+                                db.flush()
+                            except Exception as _sum_exc:
+                                db.rollback()
+                                logger.warning(
+                                    "Chromatic: failed to save summary issue: %s", _sum_exc
+                                )
+
+                    db.commit()
+                else:
+                    logger.warning(
+                        "Chromatic build ended with status '%s': %s",
+                        c_result.status, c_result.error,
+                    )
+
+            except Exception as _chromatic_exc:
+                # Chromatic failure must never block the rest of the pipeline
+                logger.warning("Chromatic integration error: %s", _chromatic_exc)
 
         # ---- Phase 4: Functional Tests ----
         if _should_run("functional", test_types):
@@ -583,7 +888,7 @@ async def _run_qa_job_async(
             if run.status == RunStatus.cancelled:
                 return
 
-            page_name = shopify_path.strip("/") or "home"
+            page_name = _clean_page_name(shopify_path)
             if page_name in combined_pages_tested:
                 continue
             combined_pages_tested.add(page_name)
@@ -742,11 +1047,16 @@ def run_qa_job(
     partial_pages: Optional[list[str]] = None,
     test_mode: str = "design",
     test_types: Optional[list[str]] = None,
+    reference_urls_override: Optional[list[str]] = None,
 ) -> dict:
     loop = asyncio.new_event_loop()
     try:
         loop.run_until_complete(
-            _run_qa_job_async(run_id, partial_pages, test_mode, test_types=test_types)
+            _run_qa_job_async(
+                run_id, partial_pages, test_mode,
+                test_types=test_types,
+                reference_urls_override=reference_urls_override,
+            )
         )
     finally:
         loop.close()

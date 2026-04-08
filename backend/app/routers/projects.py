@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user, require_role
-from app.models.project import Project
+from app.models.project import Project, SourceType
 from app.models.user import User
 from app.schemas.pagination import PaginatedResponse
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
@@ -32,22 +32,36 @@ def create_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin", "developer")),
 ) -> ProjectResponse:
+    # Auto-detect platform from source_url if source_type not explicitly set
+    resolved_type = payload.source_type
+    if resolved_type == "none" and payload.source_url:
+        from app.engines.platform_detector import detect_platform
+        resolved_type = detect_platform(payload.source_url)
+
+    # Build initial config — store explicit page pairs if provided
+    config: dict[str, Any] = {}
+    if payload.page_pairs:
+        config["page_pairs"] = [
+            {"source_path": pp.source_path, "shopify_path": pp.shopify_path}
+            for pp in payload.page_pairs
+        ]
+
     project = Project(
         name=payload.name,
         shopify_url=payload.shopify_url,
-        source_type=payload.source_type,
+        source_type=resolved_type,
         source_url=payload.source_url,
         shopify_password=payload.shopify_password,
         framer_password=payload.framer_password,
         figma_token=payload.figma_token,
         pass_threshold=payload.pass_threshold,
         created_by=current_user.id,
-        config={},
+        config=config,
     )
     db.add(project)
     db.commit()
     db.refresh(project)
-    return project  # type: ignore[return-value]
+    return ProjectResponse.from_orm_with_pairs(project)
 
 
 @router.get("", response_model=PaginatedResponse[ProjectResponse])
@@ -62,7 +76,7 @@ def list_projects(
     items = db.query(Project).offset(offset).limit(per_page).all()
     pages = math.ceil(total / per_page) if total > 0 else 1
     return PaginatedResponse(
-        items=items,
+        items=[ProjectResponse.from_orm_with_pairs(p) for p in items],
         total=total,
         page=page,
         per_page=per_page,
@@ -79,7 +93,7 @@ def get_project(
     project = db.query(Project).filter(Project.id == project_id).first()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    return project  # type: ignore[return-value]
+    return ProjectResponse.from_orm_with_pairs(project)
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
@@ -95,27 +109,24 @@ def update_project(
     check_project_owner(project, current_user)
 
     update_data = payload.model_dump(exclude_unset=True)
+
+    # Handle page_pairs separately — stored in project.config, not a direct column
+    new_pairs = update_data.pop("page_pairs", None)
+    if new_pairs is not None:
+        current_config = dict(project.config or {})
+        current_config["page_pairs"] = [
+            {"source_path": pp["source_path"], "shopify_path": pp["shopify_path"]}
+            for pp in new_pairs
+        ]
+        project.config = current_config
+
     for field, value in update_data.items():
         setattr(project, field, value)
 
     db.commit()
     db.refresh(project)
-    return project  # type: ignore[return-value]
+    return ProjectResponse.from_orm_with_pairs(project)
 
-
-# @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
-# def delete_project(
-#     project_id: int,
-#     db: Session = Depends(get_db),
-#     current_user: User = Depends(get_current_user),
-# ) -> None:
-#     project = db.query(Project).filter(Project.id == project_id).first()
-#     if project is None:
-#         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-#     check_project_owner(project, current_user)
-
-#     db.delete(project)
-#     db.commit()
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_project(
@@ -128,11 +139,10 @@ def delete_project(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
     check_project_owner(project, current_user)
-
     db.delete(project)
     db.commit()
-
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 
 @router.post("/{project_id}/discover")
 def discover_project(
@@ -140,8 +150,8 @@ def discover_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin", "developer")),
 ) -> dict:
-    """Discover pages for both Shopify and source sites, auto-map them,
-    persist mappings in project.config, and return the result."""
+    """Discover pages for both Shopify and the design source, auto-map them,
+    persist the mappings in project.config, and return the result."""
     project = db.query(Project).filter(Project.id == project_id).first()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
@@ -156,11 +166,24 @@ def discover_project(
             project.shopify_url,
             password=project.shopify_password,
         )
-        if project.source_type.value == "framer":
+
+        # Platform-aware source discovery
+        if not project.source_url or project.source_type == SourceType.none:
+            # No design source — map Shopify pages to themselves
+            source_pages = shopify_pages
+        elif project.source_type == SourceType.framer:
             source_pages = await engine.discover_framer_pages(project.source_url)
+        elif project.source_type == SourceType.figma:
+            # Figma uses API-based frame listing, not browser discovery
+            source_pages = shopify_pages
         else:
-            # For figma or unknown source types, return empty list — no browser discovery
-            source_pages = []
+            # Generic web URL (Vercel, Webflow, static site, etc.)
+            # Crawl the source URL the same way we crawl Shopify
+            try:
+                source_pages = await engine.discover_pages(project.source_url)
+            except Exception:
+                source_pages = shopify_pages
+
         return shopify_pages, source_pages
 
     try:
@@ -173,7 +196,6 @@ def discover_project(
 
     mappings = engine.auto_map(shopify_pages, source_pages)
 
-    # Persist mappings into project.config
     config: dict[str, Any] = dict(project.config or {})
     config["mappings"] = mappings
     project.config = config

@@ -16,8 +16,9 @@ def calculate_score(db: Session, run_id: int) -> float:
     """Calculate overall score for a run.
 
     Formula:
-        AI mode:     base = 100
-        Design mode: base = avg(SSIM) * 100
+        AI mode:        base = 100
+        Reference mode: base = avg(visual_score) * 100
+                        visual_score stored as 0-1 (pixelmatch: 1=identical, 0=fully different)
         penalty = critical*5 + major*2 + minor*0.5
         functional_penalty = failed_tests * 3
         score = max(0, base - penalty - functional_penalty)

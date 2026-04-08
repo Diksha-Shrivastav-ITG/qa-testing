@@ -140,12 +140,13 @@ const RunHistory = ({ projectId }: RunHistoryProps) => {
                       </span>
                     )}
                     <span className="text-gray-400 text-xs">
-                      {new Date(run.created_at).toLocaleDateString("en-US", {
+                      {new Date(run.created_at).toLocaleDateString("en-IN", {
                         year: "numeric",
                         month: "short",
                         day: "numeric",
                         hour: "2-digit",
                         minute: "2-digit",
+                        timeZone: "Asia/Kolkata",
                       })}
                     </span>
                   </div>
