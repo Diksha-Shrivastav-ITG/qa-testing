@@ -1,78 +1,82 @@
 import { useState, useEffect, useRef } from "react";
+import type { PageConfig } from "../../api/runs";
 
 interface PageEntry {
   label: string;
   enabled: boolean;
-  urls: string;
+  mode: "ai" | "design";
+  shopifyUrl: string;
+  referenceUrl: string;
 }
 
 const DEFAULT_PAGES: PageEntry[] = [
-  { label: "Homepage", enabled: true, urls: "/" },
-  { label: "Collection Pages", enabled: false, urls: "" },
-  { label: "Product Pages", enabled: false, urls: "" },
-  { label: "Other Pages", enabled: false, urls: "" },
-];
-
-const TEST_MODES = [
-  {
-    value: "design",
-    label: "Design Comparison",
-    desc: "Compare against Framer / Figma reference",
-    icon: "🎨",
-  },
-  {
-    value: "ai",
-    label: "AI Analysis Only",
-    desc: "AI reviews the site for UX, layout, and quality — no design reference needed",
-    icon: "🤖",
-  },
+  { label: "Homepage", enabled: true, mode: "ai", shopifyUrl: "/", referenceUrl: "" },
+  { label: "Collection Pages", enabled: false, mode: "ai", shopifyUrl: "", referenceUrl: "" },
+  { label: "Product Pages", enabled: false, mode: "ai", shopifyUrl: "", referenceUrl: "" },
+  { label: "Other Pages", enabled: false, mode: "ai", shopifyUrl: "", referenceUrl: "" },
 ];
 
 const TEST_TYPES = [
-  { key: "qa", label: "QA Test", desc: "Visual AI analysis & design comparison", icon: "🔍" },
-  { key: "functional", label: "Functionality Test", desc: "Cart, checkout, search, mobile menu", icon: "⚡" },
-  { key: "ada", label: "ADA Test", desc: "WCAG 2.1 accessibility compliance", icon: "♿" },
-  { key: "seo", label: "SEO Test", desc: "GTM, GA4, GSC, Bing, meta tags", icon: "🔎" },
-  { key: "performance", label: "Performance Test", desc: "Load time, TTFB, resource size", icon: "📊" },
+  { key: "qa", label: "QA Test", desc: "Visual AI analysis & design comparison", icon: "\u{1F50D}" },
+  { key: "functional", label: "Functionality Test", desc: "Cart, checkout, search, mobile menu", icon: "\u26A1" },
+  { key: "ada", label: "ADA Test", desc: "WCAG 2.1 accessibility compliance", icon: "\u267F" },
+  { key: "seo", label: "SEO Test", desc: "GTM, GA4, GSC, Bing, meta tags", icon: "\u{1F50E}" },
+  { key: "performance", label: "Performance Test", desc: "Load time, TTFB, resource size", icon: "\u{1F4CA}" },
 ];
 
 interface RunQAModalProps {
-  onConfirm: (pages: string, testMode: "design" | "ai", testTypes?: string[]) => void;
+  onConfirm: (
+    pageConfigs: PageConfig[] | undefined,
+    testMode: "design" | "ai",
+    testTypes?: string[],
+    pages?: string,
+  ) => void;
   onCancel: () => void;
   isLoading: boolean;
+  sourceType: string;
 }
 
-/** Collect page paths from the pages array (shared logic for both tabs) */
+/** Parse a URL string (which may contain multiple lines) into path(s) */
+function parseUrls(url: string): string[] {
+  const paths: string[] = [];
+  // Split by newlines to handle textarea multi-line input
+  const lines = url.split(/\n/).map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    try {
+      const parsed = new URL(line);
+      paths.push(parsed.pathname);
+    } catch {
+      paths.push(line.startsWith("/") ? line : `/${line}`);
+    }
+  }
+  return paths;
+}
+
+/** Collect page paths from the pages array (used for Full QA tab) */
 function collectPagePaths(fullQA: boolean, pages: PageEntry[]): string {
   if (fullQA) return "";
   const allPaths: string[] = [];
   for (const page of pages) {
     if (!page.enabled) continue;
-    const lines = page.urls.split("\n").map((l) => l.trim()).filter(Boolean);
-    if (lines.length === 0) {
+    const url = page.shopifyUrl.trim();
+    if (!url) {
       if (page.label === "Homepage") allPaths.push("/");
       else if (page.label === "Collection Pages") allPaths.push("/collections");
       else if (page.label === "Product Pages") allPaths.push("/products");
       else allPaths.push("__other__");
     } else {
-      for (const line of lines) {
-        try {
-          const parsed = new URL(line);
-          allPaths.push(parsed.pathname);
-        } catch {
-          allPaths.push(line.startsWith("/") ? line : `/${line}`);
-        }
-      }
+      allPaths.push(...parseUrls(url));
     }
   }
   return allPaths.join(",");
 }
 
-const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
+const RunQAModal = ({ onConfirm, onCancel, isLoading, sourceType }: RunQAModalProps) => {
+  const isAIProject = sourceType === "none";
   const [modalTab, setModalTab] = useState<"full" | "customize">("full");
-  const [fullQA, setFullQA] = useState(true);
+  // Non-AI projects can't use "all discovered pages", so default to specific pages
+  const [fullQA, setFullQA] = useState(isAIProject);
   const [pages, setPages] = useState<PageEntry[]>(DEFAULT_PAGES);
-  const [testMode, setTestMode] = useState<"design" | "ai">("ai");
   // link_audit is included by default and coupled to "qa"
   const [selectedTests, setSelectedTests] = useState<Set<string>>(
     () => new Set([...TEST_TYPES.map((t) => t.key), "link_audit"])
@@ -121,8 +125,16 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
     setPages((prev) => prev.map((p, i) => (i === idx ? { ...p, enabled: !p.enabled } : p)));
   };
 
-  const updateUrls = (idx: number, value: string) => {
-    setPages((prev) => prev.map((p, i) => (i === idx ? { ...p, urls: value } : p)));
+  const updatePageField = (idx: number, field: keyof PageEntry, value: string) => {
+    setPages((prev) =>
+      prev.map((p, i) => (i === idx ? { ...p, [field]: value } : p))
+    );
+  };
+
+  const setPageMode = (idx: number, mode: "ai" | "design") => {
+    setPages((prev) =>
+      prev.map((p, i) => (i === idx ? { ...p, mode } : p))
+    );
   };
 
   const handleFullQA = () => {
@@ -147,42 +159,84 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
   };
 
   const handleConfirm = () => {
-    const pageArg = collectPagePaths(fullQA, pages);
+    // Test mode is determined by project source type
+    const projectTestMode: "design" | "ai" = isAIProject ? "ai" : "design";
+
     if (modalTab === "full") {
-      onConfirm(pageArg, testMode, undefined);
+      // Full QA: use legacy path — send pages + global test mode
+      const pageArg = collectPagePaths(fullQA, pages);
+      onConfirm(undefined, projectTestMode, undefined, pageArg);
     } else {
-      onConfirm(pageArg, testMode, Array.from(selectedTests));
+      // Customize: build per-page configs — expand multi-line URLs into separate configs
+      const configs: PageConfig[] = [];
+      for (const p of pages) {
+        if (!p.enabled) continue;
+        const mode = isAIProject ? "ai" as const : p.mode;
+        const rawUrl = p.shopifyUrl.trim();
+        const rawRef = (p.referenceUrl || "").trim();
+        const isDesign = !isAIProject && p.mode === "design";
+        // For Homepage or single-line URLs, create one config
+        if (p.label === "Homepage" || !rawUrl.includes("\n")) {
+          configs.push({
+            label: p.label,
+            mode,
+            shopifyUrl: rawUrl || (p.label === "Homepage" ? "/" : ""),
+            referenceUrl: isDesign ? rawRef || undefined : undefined,
+          });
+        } else {
+          // Multi-line: create one config per URL, pair with reference URLs line by line
+          const urls = rawUrl.split(/\n/).map((l) => l.trim()).filter(Boolean);
+          const refUrls = rawRef ? rawRef.split(/\n/).map((l) => l.trim()).filter(Boolean) : [];
+          for (let i = 0; i < urls.length; i++) {
+            // Pair each Shopify URL with the corresponding reference URL line
+            // If fewer reference URLs, reuse the last one
+            const matchedRef = refUrls.length > 0
+              ? (refUrls[i] || refUrls[refUrls.length - 1])
+              : undefined;
+            configs.push({
+              label: p.label,
+              mode,
+              shopifyUrl: urls[i],
+              referenceUrl: isDesign ? matchedRef : undefined,
+            });
+          }
+        }
+      }
+      onConfirm(configs, projectTestMode, Array.from(selectedTests));
     }
   };
 
-  const anyEnabled = fullQA || pages.some((p) => p.enabled);
-  const canStart = !isLoading && anyEnabled && (modalTab === "full" || selectedTests.size > 0);
+  const hasValidPages = fullQA || pages.some((p) => p.enabled);
+  const canStart = !isLoading && hasValidPages && (modalTab === "full" || selectedTests.size > 0);
 
   /** Shared page selection UI used in both tabs */
-  const renderPageSelector = () => (
+  const renderPageSelector = (showModeSelector: boolean) => (
     <>
-      <label
-        className={`flex items-center gap-3 cursor-pointer px-3 py-2.5 rounded-lg border transition-colors ${
-          fullQA
-            ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 dark:border-indigo-400"
-            : "border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-white/5"
-        }`}
-      >
-        <input
-          type="radio"
-          checked={fullQA}
-          onChange={handleFullQA}
-          className="w-4 h-4 accent-indigo-600"
-        />
-        <div>
-          <span className="text-sm font-medium text-gray-800 dark:text-slate-200">Full QA — all discovered pages</span>
-          <p className="text-xs text-gray-400 dark:text-slate-500">Automatically discovers and tests all pages</p>
-        </div>
-      </label>
+      {/* Full QA all discovered pages — only for AI testing projects */}
+      {isAIProject && (
+        <label
+          className={`flex items-center gap-3 cursor-pointer px-3 py-2.5 rounded-lg border transition-colors ${
+            fullQA
+              ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 dark:border-indigo-400"
+              : "border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-white/5"
+          }`}
+        >
+          <input
+            type="radio"
+            checked={fullQA}
+            onChange={handleFullQA}
+            className="w-4 h-4 accent-indigo-600"
+          />
+          <div>
+            <span className="text-sm font-medium text-gray-800 dark:text-slate-200">Full QA — all discovered pages</span>
+            <p className="text-xs text-gray-400 dark:text-slate-500">Automatically discovers and tests all pages</p>
+          </div>
+        </label>
+      )}
 
       <div>
         <p className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide mb-2">
-          Or select specific pages
+          {isAIProject ? "Or select specific pages" : "Select pages"}
         </p>
         <div className="space-y-2">
           {pages.map((page, idx) => (
@@ -204,26 +258,103 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
                 <span className="text-sm font-medium text-gray-700 dark:text-slate-300">{page.label}</span>
               </label>
               {!fullQA && page.enabled && (
-                <div className="px-3 pb-3">
-                  <label htmlFor={`urls-${idx}`} className="sr-only">
-                    {page.label} URLs
-                  </label>
-                  <textarea
-                    id={`urls-${idx}`}
-                    value={page.urls}
-                    onChange={(e) => updateUrls(idx, e.target.value)}
-                    rows={2}
-                    placeholder={
-                      page.label === "Homepage"
-                        ? "/ (default — or paste a specific URL)"
-                        : page.label === "Collection Pages"
-                        ? "Paste collection URLs — one per line:\nhttps://store.com/collections/summer"
-                        : page.label === "Product Pages"
-                        ? "Paste product URLs — one per line:\nhttps://store.com/products/boot-1"
-                        : "Paste page URLs:\nhttps://store.com/pages/about"
-                    }
-                    className="w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500"
-                  />
+                <div className="px-3 pb-3 space-y-3">
+                  {/* Mode selector — only in Customize tab, hidden for AI-only projects */}
+                  {showModeSelector && !isAIProject && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 dark:text-slate-400 mb-1.5">Testing mode</p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPageMode(idx, "ai")}
+                          className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                            page.mode === "ai"
+                              ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-400"
+                              : "border-gray-200 text-gray-500 dark:border-slate-600 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-white/5"
+                          }`}
+                        >
+                          <span aria-hidden="true">{"\u{1F916}"}</span> AI Check
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPageMode(idx, "design")}
+                          className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                            page.mode === "design"
+                              ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-400"
+                              : "border-gray-200 text-gray-500 dark:border-slate-600 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-white/5"
+                          }`}
+                        >
+                          <span aria-hidden="true">{"\u{1F3A8}"}</span> Design Comparison
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Shopify URL input */}
+                  <div>
+                    <label htmlFor={`shopify-url-${idx}`} className="text-xs font-medium text-gray-500 dark:text-slate-400">
+                      Shopify URL{page.label !== "Homepage" ? "s (one per line)" : ""}
+                    </label>
+                    {page.label === "Homepage" ? (
+                      <input
+                        id={`shopify-url-${idx}`}
+                        type="url"
+                        value={page.shopifyUrl}
+                        onChange={(e) => updatePageField(idx, "shopifyUrl", e.target.value)}
+                        placeholder="/ (default)"
+                        className="mt-1 w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500"
+                      />
+                    ) : (
+                      <textarea
+                        id={`shopify-url-${idx}`}
+                        value={page.shopifyUrl}
+                        onChange={(e) => updatePageField(idx, "shopifyUrl", e.target.value)}
+                        placeholder={
+                          page.label === "Collection Pages"
+                            ? "https://store.com/collections/summer\nhttps://store.com/collections/winter"
+                            : page.label === "Product Pages"
+                            ? "https://store.com/products/boot-1\nhttps://store.com/products/sneaker-2"
+                            : "https://store.com/pages/about\nhttps://store.com/pages/contact"
+                        }
+                        rows={3}
+                        className="mt-1 w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500 resize-y"
+                      />
+                    )}
+                  </div>
+
+                  {/* Reference URL input — only for Design Comparison mode, hidden for AI projects */}
+                  {showModeSelector && !isAIProject && page.mode === "design" && (
+                    <div>
+                      <label htmlFor={`ref-url-${idx}`} className="text-xs font-medium text-gray-500 dark:text-slate-400">
+                        Reference URL{page.label !== "Homepage" ? "s (one per line, matching Shopify URLs)" : ""} <span className="text-gray-400 dark:text-slate-500">(Vercel, staging, HTML — any URL)</span>
+                      </label>
+                      {page.label === "Homepage" ? (
+                        <input
+                          id={`ref-url-${idx}`}
+                          type="url"
+                          value={page.referenceUrl}
+                          onChange={(e) => updatePageField(idx, "referenceUrl", e.target.value)}
+                          placeholder="https://my-preview.vercel.app"
+                          className="mt-1 w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500"
+                        />
+                      ) : (
+                        <textarea
+                          id={`ref-url-${idx}`}
+                          value={page.referenceUrl}
+                          onChange={(e) => updatePageField(idx, "referenceUrl", e.target.value)}
+                          placeholder={
+                            page.label === "Collection Pages"
+                              ? "https://my-preview.vercel.app/collections/summer\nhttps://my-preview.vercel.app/collections/winter"
+                              : page.label === "Product Pages"
+                              ? "https://my-preview.vercel.app/products/boot-1\nhttps://my-preview.vercel.app/products/sneaker-2"
+                              : "https://my-preview.vercel.app/pages/about\nhttps://my-preview.vercel.app/pages/contact"
+                          }
+                          rows={3}
+                          className="mt-1 w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500 resize-y"
+                        />
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -231,40 +362,6 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
         </div>
       </div>
     </>
-  );
-
-  /** Shared testing mode UI */
-  const renderTestingMode = (namePrefix: string) => (
-    <div>
-      <p className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide mb-2">Testing mode</p>
-      <div className="space-y-2">
-        {TEST_MODES.map((mode) => (
-          <label
-            key={mode.value}
-            className={`flex items-start gap-3 cursor-pointer px-3 py-2.5 rounded-lg border transition-colors ${
-              testMode === mode.value
-                ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 dark:border-indigo-400"
-                : "border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-white/5"
-            }`}
-          >
-            <input
-              type="radio"
-              name={namePrefix}
-              value={mode.value}
-              checked={testMode === mode.value}
-              onChange={() => setTestMode(mode.value as "design" | "ai")}
-              className="w-4 h-4 accent-indigo-600 mt-0.5"
-            />
-            <div>
-              <div className="text-sm font-medium text-gray-800 dark:text-slate-200">
-                <span aria-hidden="true">{mode.icon}</span> {mode.label}
-              </div>
-              <div className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{mode.desc}</div>
-            </div>
-          </label>
-        ))}
-      </div>
-    </div>
   );
 
   return (
@@ -298,7 +395,7 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
                 : "bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-700"
             }`}
           >
-            <span aria-hidden="true">⚡</span> Full QA
+            <span aria-hidden="true">{"\u26A1"}</span> Full QA
           </button>
           <button
             type="button"
@@ -313,11 +410,11 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
                 : "bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-700"
             }`}
           >
-            <span aria-hidden="true">⚙️</span> Customize
+            <span aria-hidden="true">{"\u2699\uFE0F"}</span> Customize
           </button>
         </div>
 
-        {/* ── FULL QA TAB ── */}
+        {/* -- FULL QA TAB -- */}
         <div
           role="tabpanel"
           id="panel-full"
@@ -325,15 +422,14 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
           hidden={modalTab !== "full"}
           className="space-y-4"
         >
-          {renderPageSelector()}
-          {renderTestingMode("testModeFull")}
+          {renderPageSelector(true)}
           <div className="bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-lg px-3 py-2 text-xs text-blue-700 dark:text-blue-400">
             <strong>Always included:</strong> ADA compliance, link &amp; button audit, functional tests.
             QA runs in background — you can navigate away safely.
           </div>
         </div>
 
-        {/* ── CUSTOMIZE TAB ── */}
+        {/* -- CUSTOMIZE TAB -- */}
         <div
           role="tabpanel"
           id="panel-customize"
@@ -341,7 +437,7 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
           hidden={modalTab !== "customize"}
           className="space-y-4"
         >
-          {/* 1. SELECT TESTS TO RUN — comes first */}
+          {/* 1. SELECT TESTS TO RUN */}
           <div>
             <p className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide mb-2">
               Select tests to run
@@ -370,7 +466,7 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
                     </div>
                   </label>
 
-                  {/* Link & Button Audit sub-item — only visible when QA Test is checked */}
+                  {/* Link & Button Audit sub-item */}
                   {t.key === "qa" && selectedTests.has("qa") && (
                     <label
                       className={`flex items-start gap-3 cursor-pointer px-3 py-2 rounded-lg border mt-1 ml-6 transition-colors ${
@@ -387,7 +483,7 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
                       />
                       <div>
                         <div className="text-xs font-medium text-gray-700 dark:text-slate-300">
-                          <span aria-hidden="true">🔗</span> Link &amp; Button Audit
+                          <span aria-hidden="true">{"\u{1F517}"}</span> Link &amp; Button Audit
                         </div>
                         <div className="text-[10px] text-gray-400 dark:text-slate-500">Check all links and buttons for broken URLs and accessibility issues</div>
                       </div>
@@ -403,16 +499,13 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
             )}
           </div>
 
-          {/* 2. SELECT PAGES — comes second */}
+          {/* 2. SELECT PAGES — with per-page mode selector */}
           <div>
             <p className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide mb-2">
               Select pages
             </p>
-            {renderPageSelector()}
+            {renderPageSelector(true)}
           </div>
-
-          {/* 3. TESTING MODE */}
-          {renderTestingMode("testModeCustomize")}
         </div>
 
         {/* Actions */}
@@ -425,8 +518,8 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading }: RunQAModalProps) => {
             {isLoading
               ? "Starting..."
               : modalTab === "customize"
-              ? <><span aria-hidden="true">⚙️</span> Run Selected Tests</>
-              : <><span aria-hidden="true">🚀</span> Start QA Run</>}
+              ? <><span aria-hidden="true">{"\u2699\uFE0F"}</span> Run Selected Tests</>
+              : <><span aria-hidden="true">{"\u{1F680}"}</span> Start QA Run</>}
           </button>
           <button
             onClick={onCancel}

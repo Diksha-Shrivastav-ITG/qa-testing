@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, Float, ForeignKey, Integer, String, func
+from sqlalchemy import Enum, Float, ForeignKey, Integer, JSON, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -45,6 +45,9 @@ class QaRun(Base):
     # Comma-separated test types that were run, e.g. "qa,functional,ada,seo,performance,link_audit"
     # NULL means Full QA mode (all tests)
     test_types: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Per-page configs for Customize tab runs: [{label, mode, shopify_url, reference_url}, ...]
+    # NULL means Full QA mode (uses project-level source)
+    page_configs: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     # Relationships
     project: Mapped[Project] = relationship("Project", back_populates="runs")

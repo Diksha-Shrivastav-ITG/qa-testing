@@ -158,29 +158,39 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
     sections_html = ""
     section_num = 0
 
-    # ── SECTION: Visual Issues ──
-    if visual_issues:
+    # ── SECTIONS: Issues grouped by PAGE (matching frontend) ──
+    # Group ALL issues by page first, then by type within each page
+    all_issues_by_page: dict[str, list[Issue]] = defaultdict(list)
+    for issue in issues:
+        all_issues_by_page[issue.page or "home"].append(issue)
+
+    # Sort pages: homepage first, then alphabetical
+    page_order = sorted(all_issues_by_page.keys(), key=lambda p: ("" if p in ("home", "/", "") else p))
+
+    for page, page_all_issues in all_issues_by_page.items():
+        if not page_all_issues:
+            continue
         section_num += 1
-        # Group by page
-        by_page: dict[str, list[Issue]] = defaultdict(list)
-        for issue in visual_issues:
-            by_page[issue.page or "home"].append(issue)
+        page_label = _page_label(page)
+
+        # Split by type within this page
+        page_visual = [i for i in page_all_issues if i.type == IssueType.visual]
+        page_functional = [i for i in page_all_issues if i.type == IssueType.functional]
+        page_content = [i for i in page_all_issues if i.type == IssueType.content] if hasattr(IssueType, "content") else []
 
         sub_html = ""
         sub_num = 0
-        for page, page_issues in by_page.items():
-            sub_num += 1
-            page_label = _page_label(page)
 
+        # Visual issues for this page
+        sub_num += 1
+        if page_visual:
             # Group by breakpoint within the page
             by_bp: dict[str | None, list[Issue]] = defaultdict(list)
-            for issue in page_issues:
+            for issue in page_visual:
                 key = str(issue.breakpoint) if issue.breakpoint else "general"
                 by_bp[key].append(issue)
 
             issue_items_html = ""
-            global_issue_n = visual_issues.index(page_issues[0]) + 1
-
             for bp_key, bp_issues in by_bp.items():
                 if bp_key != "general":
                     bp_label = BREAKPOINT_LABELS.get(int(bp_key), f"{bp_key}px")
@@ -204,8 +214,7 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
                         </div>
                         {ssim_badge}"""
 
-                for issue in bp_issues:
-                    n = visual_issues.index(issue) + 1
+                for n_idx, issue in enumerate(bp_issues, 1):
                     sev = issue.severity.value if hasattr(issue.severity, "value") else str(issue.severity)
                     suggestion = issue.ai_suggestion or ""
                     selector = issue.element_selector or ""
@@ -214,7 +223,7 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
                     issue_items_html += f"""
                     <div class="issue-block" style="border-left:4px solid {SEV_COLORS.get(sev,'#999')};background:{SEV_BG.get(sev,'#f9fafb')};">
                       <div class="issue-header-row">
-                        <span class="issue-label">Issue {section_num}.{sub_num}.{n}</span>
+                        <span class="issue-label">Issue {section_num}.{sub_num}.{page_visual.index(issue) + 1}</span>
                         <span class="sev-pill" style="background:{SEV_COLORS.get(sev,'#999')};">{sev.upper()}</span>
                       </div>
                       <p class="issue-title">{title}</p>
@@ -227,30 +236,21 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
 
             sub_html += f"""
             <div class="subsection">
-              <h3 class="sub-title">{section_num}.{sub_num} {page_label} — {len(page_issues)} Issue{"s" if len(page_issues)!=1 else ""}</h3>
+              <h3 class="sub-title"><span class="sec-icon">🎨</span> {section_num}.{sub_num} Visual Design — {len(page_visual)} Issue{"s" if len(page_visual)!=1 else ""}</h3>
               {issue_items_html}
             </div>"""
+        else:
+            sub_html += f"""
+            <div class="subsection">
+              <h3 class="sub-title"><span class="sec-icon">🎨</span> {section_num}.{sub_num} Visual Design</h3>
+              <p style="color:#16a34a;font-size:0.85rem;font-family:-apple-system,sans-serif;padding:0.5rem 0;">✅ No visual design issues found</p>
+            </div>"""
 
-        sections_html += f"""
-        <div class="section">
-          <h2 class="sec-title"><span class="sec-icon">🎨</span>{section_num}. Visual Design Issues <span class="count-badge">{len(visual_issues)}</span></h2>
-          {sub_html}
-        </div>"""
-
-    # ── SECTION: Functional Issues ──
-    if functional_issues:
-        section_num += 1
-        by_page_f: dict[str, list[Issue]] = defaultdict(list)
-        for issue in functional_issues:
-            by_page_f[issue.page or "home"].append(issue)
-
-        sub_html = ""
-        sub_num = 0
-        for page, page_issues in by_page_f.items():
-            sub_num += 1
-            page_label = _page_label(page)
+        # Functional issues for this page
+        sub_num += 1
+        if page_functional:
             issue_items_html = ""
-            for n, issue in enumerate(page_issues, 1):
+            for n, issue in enumerate(page_functional, 1):
                 sev = issue.severity.value if hasattr(issue.severity, "value") else str(issue.severity)
                 title = _title_from_description(issue.description)
                 issue_items_html += f"""
@@ -262,68 +262,137 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
                   <p class="issue-title">{title}</p>
                   <ul class="issue-meta">
                     <li><strong>Observation:</strong> {issue.description}</li>
-                    <li><strong>Page:</strong> {page_label}</li>
                     <li><strong>Expected Result:</strong> {issue.ai_suggestion or 'This functionality should work as designed.'}</li>
                   </ul>
                 </div>"""
             sub_html += f"""
             <div class="subsection">
-              <h3 class="sub-title">{section_num}.{sub_num} {page_label}</h3>
+              <h3 class="sub-title"><span class="sec-icon">⚙️</span> {section_num}.{sub_num} Functional — {len(page_functional)} Issue{"s" if len(page_functional)!=1 else ""}</h3>
               {issue_items_html}
             </div>"""
+        else:
+            sub_html += f"""
+            <div class="subsection">
+              <h3 class="sub-title"><span class="sec-icon">⚙️</span> {section_num}.{sub_num} Functional</h3>
+              <p style="color:#16a34a;font-size:0.85rem;font-family:-apple-system,sans-serif;padding:0.5rem 0;">✅ No functional issues found</p>
+            </div>"""
+
+        # Content issues for this page
+        if page_content:
+            sub_num += 1
+            issue_items_html = ""
+            for n, issue in enumerate(page_content, 1):
+                sev = issue.severity.value if hasattr(issue.severity, "value") else str(issue.severity)
+                title = _title_from_description(issue.description)
+                issue_items_html += f"""
+                <div class="issue-block" style="border-left:4px solid {SEV_COLORS.get(sev,'#999')};background:{SEV_BG.get(sev,'#f9fafb')};">
+                  <div class="issue-header-row">
+                    <span class="issue-label">Issue {section_num}.{sub_num}.{n}</span>
+                    <span class="sev-pill" style="background:{SEV_COLORS.get(sev,'#999')};">{sev.upper()}</span>
+                  </div>
+                  <p class="issue-title">{title}</p>
+                  <ul class="issue-meta">
+                    <li><strong>Issue:</strong> {issue.description}</li>
+                    {f'<li><strong>Expected / Fix:</strong> {issue.ai_suggestion}</li>' if issue.ai_suggestion else ''}
+                  </ul>
+                </div>"""
+            sub_html += f"""
+            <div class="subsection">
+              <h3 class="sub-title"><span class="sec-icon">📄</span> {section_num}.{sub_num} Content — {len(page_content)} Issue{"s" if len(page_content)!=1 else ""}</h3>
+              {issue_items_html}
+            </div>"""
+
+        # Count severities for this page
+        page_crit = sum(1 for i in page_all_issues if i.severity == IssueSeverity.critical)
+        page_major = sum(1 for i in page_all_issues if i.severity == IssueSeverity.major)
+        page_minor = sum(1 for i in page_all_issues if i.severity == IssueSeverity.minor)
+        sev_summary = []
+        if page_crit:
+            sev_summary.append(f'<span class="count-badge" style="background:#dc2626;">{page_crit} critical</span>')
+        if page_major:
+            sev_summary.append(f'<span class="count-badge" style="background:#d97706;">{page_major} major</span>')
+        if page_minor:
+            sev_summary.append(f'<span class="count-badge" style="background:#ca8a04;">{page_minor} minor</span>')
+
         sections_html += f"""
         <div class="section">
-          <h2 class="sec-title"><span class="sec-icon">⚙️</span>{section_num}. Functional Issues <span class="count-badge">{len(functional_issues)}</span></h2>
+          <h2 class="sec-title">{section_num}. {page_label} <span class="count-badge">{len(page_all_issues)} issue{"s" if len(page_all_issues)!=1 else ""}</span> {" ".join(sev_summary)}</h2>
           {sub_html}
         </div>"""
 
     # ── SECTION: Functional Test Results ──
     if functional_tests:
         section_num += 1
-        passed = [ft for ft in functional_tests if ft.status == FunctionalTestStatus.pass_]
-        failed = [ft for ft in functional_tests if ft.status == FunctionalTestStatus.fail]
+        total_passed = sum(1 for ft in functional_tests if ft.status == FunctionalTestStatus.pass_)
+        total_failed = sum(1 for ft in functional_tests if ft.status == FunctionalTestStatus.fail)
 
-        ft_items = ""
-        sub_num = 0
-        if failed:
-            sub_num += 1
-            fail_items = ""
-            for n, ft in enumerate(failed, 1):
-                err = ft.error_message or "Test failed without error details"
-                # Clean up long playwright errors
-                if len(err) > 300:
-                    err = err[:300] + "…"
-                fail_items += f"""
-                <div class="issue-block" style="border-left:4px solid #dc2626;background:#fef2f2;">
-                  <div class="issue-header-row">
-                    <span class="issue-label">Test {section_num}.{sub_num}.{n}</span>
-                    <span class="sev-pill" style="background:#dc2626;">FAILED</span>
+        # Group by page
+        by_page_ft: dict[str, list] = defaultdict(list)
+        for ft in functional_tests:
+            by_page_ft[ft.page or "home"].append(ft)
+
+        ft_sub_html = ""
+        for page, page_fts in by_page_ft.items():
+            page_label = _page_label(page)
+            rows = ""
+            for ft in page_fts:
+                is_pass = ft.status == FunctionalTestStatus.pass_
+                icon = "&#9989;" if is_pass else "&#10060;"
+                status_text = "PASSED" if is_pass else "FAILED"
+                status_color = "#16a34a" if is_pass else "#dc2626"
+                border_color = "#bbf7d0" if is_pass else "#fecaca"
+                bg_color = "#f0fdf4" if is_pass else "#fef2f2"
+
+                sev_html = ""
+                if ft.severity and not is_pass:
+                    sev_c = {"critical": "#dc2626", "major": "#d97706", "minor": "#ca8a04"}.get(ft.severity, "#6b7280")
+                    sev_html = f'<span style="color:#fff;background:{sev_c};padding:1px 6px;border-radius:10px;font-size:0.6rem;font-weight:700;margin-left:6px;">{ft.severity.upper()}</span>'
+
+                # Handle multi-line error messages with expandable details
+                err = ft.error_message or ("Test passed" if is_pass else "Test failed without details")
+                err_lines = err.split("\n")
+                if len(err_lines) <= 1:
+                    desc_html = f'<div style="font-size:0.8rem;color:#4b5563;margin-top:4px;">{_esc(err)}</div>'
+                else:
+                    summary_line = _esc(err_lines[0])
+                    detail_lines = [_esc(l) for l in err_lines[1:] if l.strip()]
+                    detail_items = "".join(f'<div style="padding:2px 0;border-bottom:1px solid #f3f4f6;">{l}</div>' for l in detail_lines)
+                    desc_html = f'''<div style="font-size:0.8rem;color:#4b5563;margin-top:4px;">{summary_line}
+                    <details style="margin-top:4px;">
+                      <summary style="font-size:0.7rem;color:#6366f1;cursor:pointer;font-weight:600;">Show details ({len(detail_lines)} items)</summary>
+                      <div style="max-height:200px;overflow-y:auto;margin-top:4px;padding-left:8px;border-left:2px solid #e0e7ff;font-size:0.75rem;color:#6b7280;">
+                        {detail_items}
+                      </div>
+                    </details></div>'''
+
+                rows += f"""
+                <div style="border:1px solid {border_color};background:{bg_color};border-radius:8px;padding:10px 14px;margin-bottom:8px;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:0.9rem;">{icon}</span>
+                    <span style="font-weight:700;font-size:0.85rem;color:#1f2937;">{_esc(ft.test_name)}</span>
+                    <span style="color:#fff;background:{status_color};padding:1px 8px;border-radius:10px;font-size:0.6rem;font-weight:700;">{status_text}</span>
+                    {sev_html}
                   </div>
-                  <p class="issue-title">{ft.test_name.replace("_", " ").title()}</p>
-                  <ul class="issue-meta">
-                    <li><strong>Error:</strong> {err}</li>
-                    {f'<li><strong>Failed at step:</strong> {ft.step_failed}</li>' if ft.step_failed else ''}
-                    <li><strong>Severity:</strong> {ft.severity or "N/A"}</li>
-                  </ul>
+                  {desc_html}
                 </div>"""
-            ft_items += f"""
-            <div class="subsection">
-              <h3 class="sub-title">{section_num}.{sub_num} Failed Tests ({len(failed)})</h3>
-              {fail_items}
-            </div>"""
-        if passed:
-            sub_num += 1
-            pass_list = "".join(f"<li>✅ {ft.test_name.replace('_',' ').title()}</li>" for ft in passed)
-            ft_items += f"""
-            <div class="subsection">
-              <h3 class="sub-title">{section_num}.{sub_num} Passed Tests ({len(passed)})</h3>
-              <ul class="pass-list">{pass_list}</ul>
+
+            page_passed = sum(1 for ft in page_fts if ft.status == FunctionalTestStatus.pass_)
+            page_failed = sum(1 for ft in page_fts if ft.status != FunctionalTestStatus.pass_)
+            page_badge = f'<span style="color:#fff;background:#16a34a;padding:2px 8px;border-radius:10px;font-size:0.65rem;font-weight:700;margin-left:8px;">{page_passed} passed</span>'
+            if page_failed:
+                page_badge += f'<span style="color:#fff;background:#dc2626;padding:2px 8px;border-radius:10px;font-size:0.65rem;font-weight:700;margin-left:4px;">{page_failed} failed</span>'
+
+            ft_sub_html += f"""
+            <div style="margin-bottom:1.5rem;">
+              <h3 style="font-family:-apple-system,sans-serif;font-size:0.95rem;font-weight:700;color:#374151;margin-bottom:0.75rem;">{page_label}{page_badge}</h3>
+              {rows}
             </div>"""
 
+        failed_badge = f'<span class="count-badge">{total_failed} failed</span>' if total_failed else ''
         sections_html += f"""
         <div class="section">
-          <h2 class="sec-title"><span class="sec-icon">🧪</span>{section_num}. Automated Test Results <span class="count-badge">{len(functional_tests)} tests</span></h2>
-          {ft_items}
+          <h2 class="sec-title"><span class="sec-icon">🧪</span>{section_num}. Functional Tests <span class="count-badge" style="background:#16a34a;">{total_passed} passed</span> {failed_badge}</h2>
+          {ft_sub_html}
         </div>"""
 
     # ── SECTION: ADA / Accessibility ──
@@ -493,22 +562,71 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
         for sr in seo_results:
             by_page_seo[sr.page or "home"].append(sr)
 
+        # Category mapping for organized SEO report display
+        _seo_category = {
+            'title_tag': 'On-Page SEO', 'meta_description': 'On-Page SEO', 'h1_tag': 'On-Page SEO',
+            'heading_hierarchy': 'On-Page SEO', 'canonical_url': 'On-Page SEO', 'meta_viewport': 'On-Page SEO',
+            'open_graph': 'On-Page SEO', 'image_alt': 'On-Page SEO', 'structured_data': 'On-Page SEO',
+            'robots_meta': 'On-Page SEO', 'internal_links': 'On-Page SEO', 'https': 'On-Page SEO',
+            'gtm_check': 'Tracking & Marketing Tags', 'gtm_noscript': 'Tracking & Marketing Tags',
+            'gtm_duplicates': 'Tracking & Marketing Tags', 'ga4_check': 'Tracking & Marketing Tags',
+            'ga4_duplicates': 'Tracking & Marketing Tags', 'google_ads_check': 'Tracking & Marketing Tags',
+            'gtag_check': 'Tracking & Marketing Tags', 'fb_pixel_check': 'Tracking & Marketing Tags',
+            'fb_pixel_duplicates': 'Tracking & Marketing Tags', 'fb_pixel_noscript': 'Tracking & Marketing Tags',
+            'tracking_tags_overview': 'Tracking & Marketing Tags',
+            'gsc_check': 'Search Engine Verification', 'bing_webmaster_check': 'Search Engine Verification',
+            'bing_siteauth': 'Search Engine Verification',
+            'sitemap_status': 'Site Configuration', 'robots_txt_status': 'Site Configuration',
+        }
+        _cat_icons = {
+            'On-Page SEO': '&#128221;', 'Tracking & Marketing Tags': '&#127991;',
+            'Search Engine Verification': '&#128279;', 'Site Configuration': '&#9881;',
+        }
+
         seo_sub_html = ""
         for page, page_srs in by_page_seo.items():
             page_label = _page_label(page)
             rows = ""
+            last_cat = None
             for sr in page_srs:
-                icon = "✅" if sr.passed else "❌"
+                cat = _seo_category.get(sr.test, 'Other')
+                if cat != last_cat:
+                    cat_icon = _cat_icons.get(cat, '&#128203;')
+                    rows += f"""
+                <tr>
+                  <td colspan="3" style="padding:14px 8px 6px;font-size:0.78rem;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:0.05em;border-bottom:2px solid #e0e7ff;">
+                    {cat_icon} {cat}
+                  </td>
+                </tr>"""
+                    last_cat = cat
+                icon = "&#9989;" if sr.passed else "&#10060;"
                 rec = f'<div style="font-size:0.75rem;color:#d97706;margin-top:2px;">{_esc(sr.recommendation)}</div>' if sr.recommendation else ""
                 sev_html = ""
                 if sr.severity and not sr.passed:
                     sev_c = {"critical": "#dc2626", "major": "#d97706", "minor": "#ca8a04"}.get(sr.severity, "#6b7280")
                     sev_html = f'<span style="color:#fff;background:{sev_c};padding:1px 6px;border-radius:10px;font-size:0.6rem;font-weight:700;margin-left:6px;">{sr.severity.upper()}</span>'
+
+                # Handle multi-line values with expandable details
+                val_lines = (sr.value or "").split("\n")
+                if len(val_lines) <= 1:
+                    val_html = _esc(sr.value)
+                else:
+                    summary_line = _esc(val_lines[0])
+                    detail_lines = [_esc(l) for l in val_lines[1:] if l.strip()]
+                    detail_items = "".join(f'<div style="padding:2px 0;border-bottom:1px solid #f3f4f6;">{l}</div>' for l in detail_lines)
+                    val_html = f'''{summary_line}
+                    <details style="margin-top:4px;">
+                      <summary style="font-size:0.7rem;color:#6366f1;cursor:pointer;font-weight:600;">Show details ({len(detail_lines)} items)</summary>
+                      <div style="max-height:250px;overflow-y:auto;margin-top:4px;padding-left:8px;border-left:2px solid #e0e7ff;font-size:0.75rem;color:#6b7280;">
+                        {detail_items}
+                      </div>
+                    </details>'''
+
                 rows += f"""
                 <tr style="border-bottom:1px solid #f3f4f6;">
                   <td style="padding:8px;font-size:0.85rem;">{icon}</td>
                   <td style="padding:8px;font-size:0.85rem;font-weight:600;color:#1f2937;">{_esc(sr.label)}{sev_html}</td>
-                  <td style="padding:8px;font-size:0.8rem;color:#4b5563;">{_esc(sr.value)}</td>
+                  <td style="padding:8px;font-size:0.8rem;color:#4b5563;">{val_html}</td>
                 </tr>
                 {f'<tr><td></td><td colspan="2" style="padding:0 8px 8px;">{rec}</td></tr>' if rec else ''}"""
 

@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     figma_default_token: str = ""
 
+    # AWS Bedrock
+    aws_access_key: str = ""
+    aws_bedrock_secret_key: str = ""
+    aws_region: str = "us-east-1"
+    bedrock_model_id: str = "amazon.nova-pro-v1:0"
+
     # CORS – stored as a comma-separated string, exposed as a list
     allowed_origins: str = "http://localhost:3000,http://localhost:5173"
 

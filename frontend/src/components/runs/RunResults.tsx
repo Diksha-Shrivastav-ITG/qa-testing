@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getRun, getCaptures, getAccessibility, getLinkAudit, getSeo, getPerformance } from "../../api/runs";
+import { getRun, getCaptures, getComparisons, getAccessibility, getLinkAudit, getSeo, getPerformance, getFunctional } from "../../api/runs";
+import SideBySideViewer from "../comparison/SideBySideViewer";
 import { listIssues } from "../../api/issues";
 import { getProject } from "../../api/projects";
 import PromptBuilder from "./PromptBuilder";
@@ -58,6 +59,23 @@ interface LinkAuditItem {
   aria_label?: string;
 }
 
+interface PageConfigData {
+  label: string;
+  mode: string;
+  shopify_url: string;
+  reference_url?: string | null;
+}
+
+interface ComparisonItem {
+  id: number;
+  page: string;
+  breakpoint: number;
+  ssim_score: number | null;
+  diff_image_url: string | null;
+  heatmap_url: string | null;
+  ai_analysis_status: string;
+}
+
 interface RunData {
   id: number;
   project_id: number;
@@ -67,6 +85,7 @@ interface RunData {
   started_at: string;
   test_mode?: string;
   test_types?: string | null; // comma-separated, null = Full QA (all tests)
+  page_configs?: PageConfigData[] | null;
 }
 
 // ---------- Helpers ----------
@@ -416,15 +435,32 @@ const PageSection = ({
               <p className="text-sm font-medium text-emerald-400">No issues on this page</p>
             </div>
           ) : (
-            orderedTypes.map((typeName) => (
-              <TypeSubsection
-                key={typeName}
-                typeName={typeName}
-                issues={byType[typeName]}
-                numberPrefix={`${pageNumber}`}
-                startIdx={typeOffsets[typeName]}
-              />
-            ))
+            <>
+              {/* Show types that have issues */}
+              {orderedTypes.map((typeName) => (
+                <TypeSubsection
+                  key={typeName}
+                  typeName={typeName}
+                  issues={byType[typeName]}
+                  numberPrefix={`${pageNumber}`}
+                  startIdx={typeOffsets[typeName]}
+                />
+              ))}
+              {/* Show "no issues" message for standard types that are absent */}
+              {typeOrder.filter((t) => !orderedTypes.includes(t)).map((typeName) => (
+                <div
+                  key={typeName}
+                  className="bg-gray-50 dark:bg-slate-800/30 rounded-xl border border-gray-200 dark:border-slate-700/40 px-4 py-3 flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-xs font-medium text-emerald-400">
+                    No {typeLabel(typeName).toLowerCase()} issues found
+                  </span>
+                </div>
+              ))}
+            </>
           )}
         </div>
       </div>
@@ -648,6 +684,107 @@ const LinkAuditSection = ({ items, sectionNum }: LinkSectionProps) => {
   );
 };
 
+// ---------- Functional Test Section ----------
+
+interface FunctionalItem {
+  id: number;
+  qa_run_id: number;
+  test_name: string;
+  status: string;
+  severity?: string;
+  step_failed?: string;
+  error_message?: string;
+  screenshot_path?: string;
+  page?: string;
+}
+
+const FunctionalValueDisplay = ({ value }: { value: string }) => {
+  const [expanded, setExpanded] = useState(false);
+  const lines = value.split("\n");
+
+  if (lines.length <= 1) {
+    return <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{value}</p>;
+  }
+
+  const summary = lines[0];
+  const details = lines.slice(1).filter((l) => l.trim());
+
+  return (
+    <div className="mt-0.5">
+      <p className="text-xs text-gray-500 dark:text-slate-400">{summary}</p>
+      {details.length > 0 && (
+        <>
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+            className="text-[10px] text-indigo-400 hover:text-indigo-300 mt-1 font-medium cursor-pointer"
+          >
+            {expanded ? "▲ Hide details" : `▼ Show details (${details.length} items)`}
+          </button>
+          {expanded && (
+            <div className="mt-1 max-h-48 overflow-y-auto text-[11px] text-gray-500 dark:text-slate-400 space-y-0.5 pl-2 border-l-2 border-gray-200 dark:border-slate-600">
+              {details.map((line, i) => (
+                <div key={i} className="py-0.5 break-all">{line}</div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+const FunctionalSection = ({ items, sectionNum }: { items: FunctionalItem[]; sectionNum: number }) => {
+  const passed = items.filter((i) => i.status === "pass").length;
+  const failed = items.filter((i) => i.status === "fail").length;
+  const grouped = groupBy(items, (i) => i.page || "home");
+
+  return (
+    <div className="border border-gray-200 dark:border-slate-700/60 rounded-2xl overflow-hidden">
+      <Collapsible
+        defaultOpen={false}
+        header={(open, toggle) => (
+          <button onClick={toggle} className="w-full flex items-center justify-between px-5 py-4 bg-gray-100 dark:bg-slate-700/40 hover:bg-gray-200 dark:hover:bg-slate-700/60 text-left border-b border-gray-200 dark:border-slate-700/60 transition-colors">
+            <div className="flex items-center gap-3">
+              <div className="w-7 h-7 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-sm">🧪</div>
+              <span className="font-semibold text-gray-900 dark:text-white text-sm">{sectionNum}. Functional Tests</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 font-semibold">{passed} passed</span>
+              {failed > 0 && <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/25 font-semibold">{failed} failed</span>}
+            </div>
+            <svg className={`w-4 h-4 text-gray-400 dark:text-slate-500 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
+          </button>
+        )}
+      >
+        <div className="p-4 space-y-4">
+          {Object.entries(grouped).map(([page, pageItems]) => (
+            <div key={page}>
+              <h4 className="text-[10px] font-semibold text-gray-500 dark:text-slate-500 uppercase tracking-widest mb-2">{pageLabel(page)}</h4>
+              <div className="space-y-1.5">
+                {pageItems.map((item) => (
+                  <div key={item.id} className={`flex items-start gap-3 px-3 py-2.5 rounded-xl text-sm border ${item.status === "pass" ? "bg-emerald-500/5 border-emerald-500/15" : "bg-red-500/5 border-red-500/15"}`}>
+                    <span className="mt-0.5 shrink-0">{item.status === "pass" ? "✅" : "❌"}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-800 dark:text-slate-200 text-xs">{item.test_name}</span>
+                        {item.severity && item.status === "fail" && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${sevStyle(item.severity)}`}>{item.severity}</span>
+                        )}
+                      </div>
+                      {item.error_message && <FunctionalValueDisplay value={item.error_message} />}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {items.length === 0 && <p className="text-sm text-gray-400 dark:text-slate-500 text-center py-4">No functional test data</p>}
+        </div>
+      </Collapsible>
+    </div>
+  );
+};
+
 // ---------- SEO Section ----------
 
 interface SeoItem {
@@ -660,6 +797,41 @@ interface SeoItem {
   recommendation?: string;
   severity?: string;
 }
+
+const SeoValueDisplay = ({ value }: { value: string }) => {
+  const [expanded, setExpanded] = useState(false);
+  const lines = value.split("\n");
+
+  if (lines.length <= 1) {
+    return <p className="text-xs text-gray-500 dark:text-slate-500 mt-0.5">{value}</p>;
+  }
+
+  const summary = lines[0];
+  const details = lines.slice(1).filter((l) => l.trim());
+
+  return (
+    <div className="mt-0.5">
+      <p className="text-xs text-gray-500 dark:text-slate-500">{summary}</p>
+      {details.length > 0 && (
+        <>
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+            className="text-[10px] text-indigo-400 hover:text-indigo-300 mt-1 font-medium cursor-pointer"
+          >
+            {expanded ? "▲ Hide details" : `▼ Show details (${details.length} items)`}
+          </button>
+          {expanded && (
+            <div className="mt-1 max-h-64 overflow-y-auto text-[11px] text-gray-500 dark:text-slate-400 space-y-0.5 pl-2 border-l-2 border-gray-200 dark:border-slate-600">
+              {details.map((line, i) => (
+                <div key={i} className="py-0.5 break-all">{line}</div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
 
 const SeoSection = ({ items, sectionNum }: { items: SeoItem[]; sectionNum: number }) => {
   const passed = items.filter((i) => i.passed).length;
@@ -699,7 +871,7 @@ const SeoSection = ({ items, sectionNum }: { items: SeoItem[]; sectionNum: numbe
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${sevStyle(item.severity)}`}>{item.severity}</span>
                         )}
                       </div>
-                      <p className="text-xs text-gray-500 dark:text-slate-500 mt-0.5">{item.value}</p>
+                      <SeoValueDisplay value={item.value} />
                       {item.recommendation && <p className="text-xs text-orange-400 mt-0.5">{item.recommendation}</p>}
                     </div>
                   </div>
@@ -814,9 +986,10 @@ interface ScoreCardProps {
   issues: Issue[];
   accCount: number;
   testMode?: string;
+  hasDesignComparison?: boolean;
 }
 
-const ScoreCard = ({ score, threshold, issues, accCount, testMode }: ScoreCardProps) => {
+const ScoreCard = ({ score, threshold, issues, accCount, testMode, hasDesignComparison }: ScoreCardProps) => {
   const passed = score !== null && score >= threshold;
   const critCount = issues.filter((i) => i.severity === "critical").length;
   const majorCount = issues.filter((i) => i.severity === "major").length;
@@ -872,9 +1045,14 @@ const ScoreCard = ({ score, threshold, issues, accCount, testMode }: ScoreCardPr
                 {passed ? "QA Passed" : "QA Failed"}
               </span>
             )}
-            {testMode === "ai" && (
+            {testMode === "ai" && !hasDesignComparison && (
               <span className="text-xs px-2.5 py-1 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/25 font-semibold">
                 AI Mode
+              </span>
+            )}
+            {hasDesignComparison && (
+              <span className="text-xs px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/25 font-semibold">
+                Design Comparison
               </span>
             )}
           </div>
@@ -948,6 +1126,12 @@ const RunResults = ({ runId }: RunResultsProps) => {
     enabled: !!runId,
   });
 
+  const { data: comparisonsData } = useQuery<ComparisonItem[]>({
+    queryKey: ["comparisons", runId],
+    queryFn: () => getComparisons(runId).then((r) => r.data),
+    enabled: !!runId,
+  });
+
   const { data: accData } = useQuery<AccessibilityItem[]>({
     queryKey: ["accessibility", runId],
     queryFn: () => getAccessibility(runId).then((r) => r.data),
@@ -969,6 +1153,12 @@ const RunResults = ({ runId }: RunResultsProps) => {
   const { data: perfData } = useQuery<PerfItem[]>({
     queryKey: ["performance", runId],
     queryFn: () => getPerformance(runId).then((r) => r.data),
+    enabled: !!runId,
+  });
+
+  const { data: functionalData } = useQuery<FunctionalItem[]>({
+    queryKey: ["functional", runId],
+    queryFn: () => getFunctional(runId).then((r) => r.data),
     enabled: !!runId,
   });
 
@@ -1009,10 +1199,17 @@ const RunResults = ({ runId }: RunResultsProps) => {
   const threshold = projectData?.pass_threshold ?? 90;
   const issues: Issue[] = allIssues ?? [];
   const captures: Capture[] = capturesData ?? [];
+  const comparisons: ComparisonItem[] = comparisonsData ?? [];
   const accItems: AccessibilityItem[] = accData ?? [];
+
+  // Check if any page used design comparison mode
+  const hasDesignComparison =
+    (run.page_configs?.some((pc) => pc.mode === "design") ?? false) ||
+    captures.some((c) => c.source === "design");
   const linkItems: LinkAuditItem[] = linkData ?? [];
   const seoItems: SeoItem[] = seoData ?? [];
   const perfItems: PerfItem[] = perfData ?? [];
+  const functionalItems: FunctionalItem[] = functionalData ?? [];
 
   // Group issues by page
   const issuesByPage = groupBy(issues, (i) => i.page ?? "home");
@@ -1030,14 +1227,13 @@ const RunResults = ({ runId }: RunResultsProps) => {
     return a.localeCompare(b);
   });
 
-  // Only show pages that have issues
-  const pagesWithIssues = pageList.filter(
-    (p) => issuesByPage[p]?.length > 0
-  );
+  // Show all tested pages (not just those with issues)
+  const pagesWithIssues = pageList;
 
   // Determine which sections were actually run
   // test_types is null → Full QA → show everything
   const runTypes = run.test_types ? new Set(run.test_types.split(",")) : null;
+  const showFunctional = runTypes === null || runTypes.has("functional");
   const showAda = runTypes === null || runTypes.has("ada");
   const showLinkAudit = runTypes === null || runTypes.has("link_audit");
   const showSeo = runTypes === null || runTypes.has("seo");
@@ -1045,6 +1241,7 @@ const RunResults = ({ runId }: RunResultsProps) => {
 
   // Section numbering: pages first, then only sections that were run
   let sectionCounter = pagesWithIssues.length;
+  const functionalSectionNum = showFunctional ? ++sectionCounter : 0;
   const accSectionNum = showAda ? ++sectionCounter : 0;
   const linkSectionNum = showLinkAudit ? ++sectionCounter : 0;
   const seoSectionNum = showSeo ? ++sectionCounter : 0;
@@ -1069,6 +1266,7 @@ const RunResults = ({ runId }: RunResultsProps) => {
         issues={issues}
         accCount={accItems.length}
         testMode={run.test_mode}
+        hasDesignComparison={hasDesignComparison}
       />
 
       {/* Custom Run badge — only shown when test_types is set */}
@@ -1100,7 +1298,7 @@ const RunResults = ({ runId }: RunResultsProps) => {
           </span>
           <span className="text-gray-300 dark:text-slate-700">|</span>
           <span className="text-xs text-gray-400 dark:text-slate-600">
-            {pagesWithIssues.length} page{pagesWithIssues.length !== 1 ? "s" : ""} affected
+            {pageList.filter((p) => (issuesByPage[p]?.length ?? 0) > 0).length} page{pageList.filter((p) => (issuesByPage[p]?.length ?? 0) > 0).length !== 1 ? "s" : ""} affected
           </span>
         </div>
         {issues.length > 0 && (
@@ -1116,6 +1314,88 @@ const RunResults = ({ runId }: RunResultsProps) => {
         )}
       </div>
 
+      {/* Visual Comparison Section — shown when design captures exist */}
+      {hasDesignComparison && (() => {
+        // Get unique pages that have design captures
+        const designPages = [...new Set(captures.filter((c) => c.source === "design").map((c) => c.page))];
+        return designPages.map((pageName) => {
+          // Find best breakpoint (largest) for both sources
+          const shopifyCapture = captures
+            .filter((c) => c.page === pageName && c.source === "shopify")
+            .sort((a, b) => b.breakpoint - a.breakpoint)[0];
+          const designCapture = captures
+            .filter((c) => c.page === pageName && c.source === "design")
+            .sort((a, b) => b.breakpoint - a.breakpoint)[0];
+          const comparison = comparisons
+            .filter((c) => c.page === pageName)
+            .sort((a, b) => b.breakpoint - a.breakpoint)[0];
+
+          if (!shopifyCapture && !designCapture) return null;
+
+          return (
+            <div
+              key={`comparison-${pageName}`}
+              className="border border-gray-200 dark:border-slate-700/60 rounded-2xl overflow-hidden bg-white dark:bg-slate-800/30 backdrop-blur-sm"
+            >
+              <div className="px-5 py-4 bg-gray-100 dark:bg-slate-700/40 border-b border-gray-200 dark:border-slate-700/60">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="bg-gradient-to-br from-blue-600 to-cyan-600 text-white text-xs font-bold rounded-lg w-7 h-7 flex items-center justify-center shadow-lg shadow-blue-500/20">
+                      VS
+                    </span>
+                    <span className="font-semibold text-gray-900 dark:text-white text-sm">
+                      Visual Comparison — {pageName === "home" ? "Homepage" : `/${pageName}`}
+                    </span>
+                  </div>
+                  {comparison && comparison.ssim_score != null && (
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-2.5 py-1 rounded-full font-semibold border ${
+                        comparison.ssim_score >= 0.95
+                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
+                          : comparison.ssim_score >= 0.8
+                          ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/25"
+                          : "bg-red-500/10 text-red-400 border-red-500/25"
+                      }`}>
+                        SSIM: {(comparison.ssim_score * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="p-5">
+                <SideBySideViewer
+                  designImageUrl={designCapture?.image_url ? captureUrl(designCapture.image_url) : undefined}
+                  shopifyImageUrl={shopifyCapture?.image_url ? captureUrl(shopifyCapture.image_url) : undefined}
+                  diffOverlayUrl={comparison?.heatmap_url ? captureUrl(comparison.heatmap_url) : undefined}
+                />
+                {/* Breakpoint selector */}
+                {(() => {
+                  const breakpoints = [...new Set(
+                    captures.filter((c) => c.page === pageName && c.source === "design").map((c) => c.breakpoint)
+                  )].sort((a, b) => b - a);
+                  if (breakpoints.length <= 1) return null;
+                  return (
+                    <div className="mt-4 flex items-center gap-2">
+                      <span className="text-xs text-gray-500 dark:text-slate-400">All breakpoints:</span>
+                      {breakpoints.map((bp) => {
+                        const comp = comparisons.find((c) => c.page === pageName && c.breakpoint === bp);
+                        return (
+                          <span key={bp} className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-300">
+                            {bp}px {comp?.ssim_score != null ? `(${(comp.ssim_score * 100).toFixed(1)}%)` : ""}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
+                {/* Differences are shown in the page-by-page sections below */}
+              </div>
+            </div>
+          );
+        });
+      })()}
+
       {/* Page-by-page sections */}
       {pagesWithIssues.map((pageName, idx) => (
         <div
@@ -1125,11 +1405,14 @@ const RunResults = ({ runId }: RunResultsProps) => {
           <PageSection
             pageName={pageName}
             pageNumber={idx + 1}
-            issues={issuesByPage[pageName] ?? []}
+            issues={(issuesByPage[pageName] ?? []).filter((i) => i.type !== "functional")}
             captures={captures}
           />
         </div>
       ))}
+
+      {/* Functional Tests Section — hidden when functional test was not selected */}
+      {showFunctional && <FunctionalSection items={functionalItems} sectionNum={functionalSectionNum} />}
 
       {/* Accessibility Section — hidden when ADA test was not selected */}
       {showAda && <AccessibilitySection items={accItems} sectionNum={accSectionNum} />}

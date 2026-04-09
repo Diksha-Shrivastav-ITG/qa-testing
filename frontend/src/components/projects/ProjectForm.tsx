@@ -86,33 +86,55 @@ const ProjectForm = ({ onSubmit, onCancel, isLoading }: ProjectFormProps) => {
             />
           </div>
 
-          {/* Source Type */}
+          {/* Source Type — tab-style radio buttons */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Design Source
             </label>
-            <select
-              name="source_type"
-              value={form.source_type}
-              onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="none">None (AI testing only)</option>
-              <option value="framer">Framer</option>
-              <option value="figma">Figma</option>
-            </select>
-            {!hasDesignSource && (
-              <p className="mt-1 text-xs text-gray-400">
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { value: "none", label: "AI Testing", icon: "\u{1F916}" },
+                { value: "framer", label: "Framer", icon: "\u{1F3A8}" },
+                { value: "figma", label: "Figma", icon: "\u{1F58C}\uFE0F" },
+                { value: "other", label: "Other", icon: "\u{1F517}" },
+              ].map((opt) => (
+                <label
+                  key={opt.value}
+                  className={`flex flex-col items-center gap-1 cursor-pointer px-2 py-2.5 rounded-lg border-2 text-center transition-all ${
+                    form.source_type === opt.value
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm"
+                      : "border-gray-200 text-gray-500 hover:border-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="source_type"
+                    value={opt.value}
+                    checked={form.source_type === opt.value}
+                    onChange={handleChange}
+                    className="sr-only"
+                  />
+                  <span className="text-lg" aria-hidden="true">{opt.icon}</span>
+                  <span className="text-xs font-semibold">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+            {form.source_type === "none" && (
+              <p className="mt-2 text-xs text-gray-400">
                 No design reference — QA will use AI analysis to review your Shopify site
               </p>
             )}
           </div>
 
-          {/* Source URL — only shown when Framer/Figma selected */}
+          {/* Source URL — shown when Framer/Figma/Other selected */}
           {hasDesignSource && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                {form.source_type === "figma" ? "Figma" : "Framer"} URL{" "}
+                {form.source_type === "figma"
+                  ? "Figma URL"
+                  : form.source_type === "framer"
+                  ? "Framer URL"
+                  : "Reference URL"}{" "}
                 <span className="text-red-500">*</span>
               </label>
               <input
@@ -121,7 +143,11 @@ const ProjectForm = ({ onSubmit, onCancel, isLoading }: ProjectFormProps) => {
                 value={form.source_url}
                 onChange={handleChange}
                 required
-                placeholder="https://..."
+                placeholder={
+                  form.source_type === "other"
+                    ? "https://example.com (any reference URL)"
+                    : "https://..."
+                }
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>

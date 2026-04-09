@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getProject, updateProject } from "../api/projects";
 import { listRuns, startRun } from "../api/runs";
+import type { PageConfig } from "../api/runs";
 import RunQAModal from "../components/runs/RunQAModal";
 
 interface Run {
@@ -71,8 +72,17 @@ const ProjectDetailPage = () => {
   });
 
   const runMutation = useMutation({
-    mutationFn: ({ pages, testMode, testTypes }: { pages: string; testMode: "design" | "ai"; testTypes?: string[] }) =>
-      startRun(projectId, pages || undefined, testMode, testTypes),
+    mutationFn: ({
+      pageConfigs,
+      testMode,
+      testTypes,
+      pages,
+    }: {
+      pageConfigs?: PageConfig[];
+      testMode: "design" | "ai";
+      testTypes?: string[];
+      pages?: string;
+    }) => startRun(projectId, pageConfigs, testMode, testTypes, pages),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["runs", projectId] });
       setShowRunModal(false);
@@ -429,11 +439,12 @@ const ProjectDetailPage = () => {
       {/* Run QA Modal */}
       {showRunModal && (
         <RunQAModal
-          onConfirm={(pages, testMode, testTypes) =>
-            runMutation.mutate({ pages, testMode, testTypes })
+          onConfirm={(pageConfigs, testMode, testTypes, pages) =>
+            runMutation.mutate({ pageConfigs, testMode, testTypes, pages })
           }
           onCancel={() => setShowRunModal(false)}
           isLoading={runMutation.isPending}
+          sourceType={project.source_type}
         />
       )}
     </div>

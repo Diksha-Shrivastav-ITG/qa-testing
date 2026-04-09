@@ -46,99 +46,192 @@ _SMART_FUNCTIONAL_JS = """
     // 1. CHECK: Page has a <title> tag
     const title = document.title || '';
     results.push({
-        name: 'Page has a title tag',
+        name: 'Page Title Tag',
         status: title.length > 0 ? 'pass' : 'fail',
-        error: title.length > 0 ? null : 'Page <title> is empty or missing',
+        error: title.length > 0
+            ? 'PASSED — Title tag found: "' + title + '" (' + title.length + ' chars)'
+            : 'FAILED — Page <title> is empty or missing. Every page must have a descriptive title for SEO and browser tab display.',
         severity: 'major'
     });
 
     // 2. CHECK: Page has exactly one <h1>
     const h1s = document.querySelectorAll('h1');
+    let h1Detail = '';
+    if (h1s.length === 1) {
+        h1Detail = 'PASSED — Single H1 found: "' + h1s[0].textContent.trim().substring(0, 100) + '"';
+    } else if (h1s.length === 0) {
+        h1Detail = 'FAILED — No H1 heading found on the page. Each page should have exactly one H1 for proper heading structure and SEO.';
+    } else {
+        const h1Texts = Array.from(h1s).map(function(h, i) { return '  H1 #' + (i + 1) + ': "' + h.textContent.trim().substring(0, 80) + '"'; });
+        h1Detail = 'FAILED — Found ' + h1s.length + ' H1 headings (should be exactly 1 per page):\\n' + h1Texts.join('\\n');
+    }
     results.push({
-        name: 'Page has exactly one H1 heading',
+        name: 'Single H1 Heading',
         status: h1s.length === 1 ? 'pass' : 'fail',
-        error: h1s.length === 0 ? 'No H1 heading found on the page' :
-               h1s.length > 1 ? `Found ${h1s.length} H1 headings — should be exactly 1 for SEO` : null,
+        error: h1Detail,
         severity: h1s.length === 0 ? 'major' : 'minor'
     });
 
     // 3. CHECK: All images have alt text
     const imgs = Array.from(document.querySelectorAll('img'));
     const missingAlt = imgs.filter(img => !img.alt && isVisible(img));
+    let imgAltDetail = '';
+    if (missingAlt.length === 0) {
+        imgAltDetail = 'PASSED — All ' + imgs.length + ' images on the page have alt text attributes for accessibility.';
+    } else {
+        const missingSrcs = missingAlt.slice(0, 10).map(function(img, i) {
+            const src = img.src || img.getAttribute('data-src') || '(no src)';
+            const shortSrc = src.length > 80 ? '...' + src.slice(-60) : src;
+            return '  ' + (i + 1) + '. ' + shortSrc;
+        });
+        imgAltDetail = 'FAILED — ' + missingAlt.length + ' of ' + imgs.length + ' visible images are missing alt text:\\n' + missingSrcs.join('\\n');
+        if (missingAlt.length > 10) imgAltDetail += '\\n  ... and ' + (missingAlt.length - 10) + ' more';
+    }
     results.push({
-        name: 'All visible images have alt text',
+        name: 'Image Alt Text',
         status: missingAlt.length === 0 ? 'pass' : 'fail',
-        error: missingAlt.length > 0 ? `${missingAlt.length} visible image(s) missing alt text` : null,
+        error: imgAltDetail,
         severity: 'minor'
     });
 
-    // 4. CHECK: No broken images (only flag images where complete=true to avoid
-    //    false positives from images that are still loading)
+    // 4. CHECK: No broken images
     const brokenImgs = imgs.filter(img => img.src && img.complete && img.naturalWidth === 0 && isVisible(img));
+    let brokenDetail = '';
+    if (brokenImgs.length === 0) {
+        brokenDetail = 'PASSED — All ' + imgs.length + ' images loaded successfully. No broken images detected.';
+    } else {
+        const brokenSrcs = brokenImgs.slice(0, 10).map(function(img, i) {
+            const src = img.src || '(unknown)';
+            const shortSrc = src.length > 80 ? '...' + src.slice(-60) : src;
+            return '  ' + (i + 1) + '. ' + shortSrc;
+        });
+        brokenDetail = 'FAILED — ' + brokenImgs.length + ' image(s) failed to load (broken or inaccessible):\\n' + brokenSrcs.join('\\n');
+    }
     results.push({
-        name: 'No broken images on the page',
+        name: 'No Broken Images',
         status: brokenImgs.length === 0 ? 'pass' : 'fail',
-        error: brokenImgs.length > 0 ? `${brokenImgs.length} image(s) failed to load` : null,
+        error: brokenDetail,
         severity: 'major'
     });
 
     // 5. CHECK: Navigation exists
     const nav = document.querySelector('nav, header nav, [role="navigation"]');
+    let navDetail = '';
+    if (nav && isVisible(nav)) {
+        const navTag = nav.tagName.toLowerCase();
+        const navRole = nav.getAttribute('role') || '';
+        navDetail = 'PASSED — Navigation element found (<' + navTag + (navRole ? ' role="' + navRole + '"' : '') + '>). Navigation is visible and accessible.';
+    } else if (nav) {
+        navDetail = 'FAILED — A <nav> element exists in the DOM but is not visible (display:none, zero dimensions, or hidden). Users cannot see or interact with the navigation.';
+    } else {
+        navDetail = 'FAILED — No <nav>, <header nav>, or [role="navigation"] element found on the page. A visible navigation menu is essential for site usability.';
+    }
     results.push({
-        name: 'Navigation menu exists',
+        name: 'Navigation Menu Exists',
         status: nav && isVisible(nav) ? 'pass' : 'fail',
-        error: !nav ? 'No <nav> element found' : !isVisible(nav) ? 'Navigation exists but is not visible' : null,
+        error: navDetail,
         severity: 'major'
     });
 
     // 6. CHECK: Navigation has links
     if (nav) {
         const navLinks = nav.querySelectorAll('a[href]');
+        let navLinksDetail = '';
+        if (navLinks.length >= 2) {
+            const linkTexts = Array.from(navLinks).slice(0, 15).map(function(a) {
+                const text = a.textContent.trim().substring(0, 50) || '(no text)';
+                const href = a.getAttribute('href') || '';
+                return '  • ' + text + ' → ' + href;
+            });
+            navLinksDetail = 'PASSED — Navigation contains ' + navLinks.length + ' links:\\n' + linkTexts.join('\\n');
+            if (navLinks.length > 15) navLinksDetail += '\\n  ... and ' + (navLinks.length - 15) + ' more links';
+        } else {
+            navLinksDetail = 'FAILED — Navigation only has ' + navLinks.length + ' link(s). Expected at least 2 navigation links for proper site navigation.';
+        }
         results.push({
-            name: 'Navigation contains links',
+            name: 'Navigation Contains Links',
             status: navLinks.length >= 2 ? 'pass' : 'fail',
-            error: navLinks.length < 2 ? `Navigation only has ${navLinks.length} link(s) — expected at least 2` : null,
+            error: navLinksDetail,
             severity: 'major'
         });
     }
 
-    // 7. CHECK: No console errors in the page (check for error elements)
+    // 7. CHECK: No visible error messages
     const errorBanners = document.querySelectorAll('[class*="error"], [class*="Error"], .shopify-challenge__container');
     const realErrors = Array.from(errorBanners).filter(el => isVisible(el) && el.textContent.length > 5);
+    let errorDetail = '';
+    if (realErrors.length === 0) {
+        errorDetail = 'PASSED — No visible error messages, error banners, or Shopify challenge screens detected on the page.';
+    } else {
+        const errorTexts = realErrors.slice(0, 5).map(function(el, i) {
+            const text = el.textContent.trim().substring(0, 120);
+            const cls = el.className || '(no class)';
+            return '  ' + (i + 1) + '. [.' + cls.split(' ')[0] + '] "' + text + '"';
+        });
+        errorDetail = 'FAILED — Found ' + realErrors.length + ' visible error element(s) on the page:\\n' + errorTexts.join('\\n');
+    }
     results.push({
-        name: 'No visible error messages on page',
+        name: 'No Visible Error Messages',
         status: realErrors.length === 0 ? 'pass' : 'fail',
-        error: realErrors.length > 0 ? `Found ${realErrors.length} visible error element(s) on the page` : null,
+        error: errorDetail,
         severity: 'critical'
     });
 
     // 8. CHECK: Footer exists
     const footer = document.querySelector('footer, [role="contentinfo"]');
+    let footerDetail = '';
+    if (footer) {
+        const footerLinks = footer.querySelectorAll('a[href]');
+        footerDetail = 'PASSED — Footer section found (<' + footer.tagName.toLowerCase() + '>). Contains ' + footerLinks.length + ' links.';
+    } else {
+        footerDetail = 'FAILED — No <footer> or [role="contentinfo"] element found. A footer section is expected for contact info, legal links, and site navigation.';
+    }
     results.push({
-        name: 'Footer section exists',
+        name: 'Footer Section Exists',
         status: footer ? 'pass' : 'fail',
-        error: footer ? null : 'No <footer> element found',
+        error: footerDetail,
         severity: 'minor'
     });
 
     // 9. CHECK: No horizontal overflow
-    const hasHScroll = document.documentElement.scrollWidth > document.documentElement.clientWidth + 5;
+    const scrollW = document.documentElement.scrollWidth;
+    const clientW = document.documentElement.clientWidth;
+    const hasHScroll = scrollW > clientW + 5;
+    let hScrollDetail = '';
+    if (!hasHScroll) {
+        hScrollDetail = 'PASSED — No horizontal overflow detected. Page width (' + scrollW + 'px) fits within viewport (' + clientW + 'px).';
+    } else {
+        hScrollDetail = 'FAILED — Page has horizontal overflow. Content width is ' + scrollW + 'px but viewport is only ' + clientW + 'px (' + (scrollW - clientW) + 'px overflow). This causes an unwanted horizontal scrollbar.';
+    }
     results.push({
-        name: 'No horizontal scroll / overflow',
+        name: 'No Horizontal Scroll / Overflow',
         status: !hasHScroll ? 'pass' : 'fail',
-        error: hasHScroll ? `Page has horizontal overflow (${document.documentElement.scrollWidth}px > ${document.documentElement.clientWidth}px)` : null,
+        error: hScrollDetail,
         severity: 'major'
     });
 
     // 10. CHECK: Links with href="#" or empty href
-    const badLinks = Array.from(document.querySelectorAll('a')).filter(a => {
+    const allLinks = Array.from(document.querySelectorAll('a'));
+    const badLinks = allLinks.filter(a => {
         const href = (a.getAttribute('href') || '').trim();
         return isVisible(a) && (!href || href === '#' || href === 'javascript:void(0)');
     });
+    let badLinksDetail = '';
+    if (badLinks.length === 0) {
+        badLinksDetail = 'PASSED — All ' + allLinks.length + ' links on the page have valid href attributes. No empty or placeholder links found.';
+    } else {
+        const badLinkTexts = badLinks.slice(0, 10).map(function(a, i) {
+            const text = a.textContent.trim().substring(0, 50) || '(no text)';
+            const href = a.getAttribute('href') || '(empty)';
+            return '  ' + (i + 1) + '. "' + text + '" → href="' + href + '"';
+        });
+        badLinksDetail = 'FAILED — ' + badLinks.length + ' link(s) have empty or placeholder href values:\\n' + badLinkTexts.join('\\n');
+        if (badLinks.length > 10) badLinksDetail += '\\n  ... and ' + (badLinks.length - 10) + ' more';
+    }
     results.push({
-        name: 'No links with empty or placeholder href',
+        name: 'No Empty/Placeholder Links',
         status: badLinks.length === 0 ? 'pass' : 'fail',
-        error: badLinks.length > 0 ? `${badLinks.length} link(s) have empty or "#" href` : null,
+        error: badLinksDetail,
         severity: 'minor'
     });
 
@@ -151,10 +244,21 @@ _SMART_FUNCTIONAL_JS = """
         const title = btn.getAttribute('title') || '';
         return !text && !aria && !title;
     });
+    let btnDetail = '';
+    if (unlabeled.length === 0) {
+        btnDetail = 'PASSED — All ' + buttons.length + ' buttons on the page have accessible names (text, aria-label, or title attribute).';
+    } else {
+        const btnInfos = unlabeled.slice(0, 10).map(function(btn, i) {
+            const cls = btn.className ? '.' + btn.className.split(' ')[0] : '';
+            const tag = '<button' + cls + '>';
+            return '  ' + (i + 1) + '. ' + tag + ' — no text, aria-label, or title';
+        });
+        btnDetail = 'FAILED — ' + unlabeled.length + ' of ' + buttons.length + ' button(s) have no accessible name:\\n' + btnInfos.join('\\n');
+    }
     results.push({
-        name: 'All buttons have accessible names',
+        name: 'Buttons Have Accessible Names',
         status: unlabeled.length === 0 ? 'pass' : 'fail',
-        error: unlabeled.length > 0 ? `${unlabeled.length} button(s) have no text, aria-label, or title` : null,
+        error: btnDetail,
         severity: 'minor'
     });
 
@@ -162,20 +266,34 @@ _SMART_FUNCTIONAL_JS = """
     const isProduct = window.location.pathname.includes('/products/');
     if (isProduct) {
         const cartForm = document.querySelector('form[action*="/cart/add"]');
+        let cartDetail = '';
+        if (cartForm) {
+            const submitBtn = cartForm.querySelector('button[type="submit"], input[type="submit"], button[name="add"]');
+            const btnText = submitBtn ? (submitBtn.textContent || submitBtn.value || '').trim() : '(no submit button found)';
+            cartDetail = 'PASSED — Add to Cart form found with action="/cart/add". Submit button: "' + btnText + '"';
+        } else {
+            cartDetail = 'FAILED — No form with action="/cart/add" found on this product page. Customers cannot add this product to their cart. This is a critical e-commerce issue.';
+        }
         results.push({
-            name: 'Product page has Add to Cart form',
+            name: 'Product Add to Cart Form',
             status: cartForm ? 'pass' : 'fail',
-            error: cartForm ? null : 'No form with action="/cart/add" found on this product page',
+            error: cartDetail,
             severity: 'critical'
         });
     }
 
     // 13. CHECK: Meta viewport tag exists
     const viewport = document.querySelector('meta[name="viewport"]');
+    let vpDetail = '';
+    if (viewport) {
+        vpDetail = 'PASSED — Meta viewport tag found: <meta name="viewport" content="' + (viewport.getAttribute('content') || '') + '">. Page is configured for mobile devices.';
+    } else {
+        vpDetail = 'FAILED — Missing <meta name="viewport"> tag. Without this, the page will not scale properly on mobile devices, causing poor mobile experience.';
+    }
     results.push({
-        name: 'Meta viewport tag exists (mobile-friendly)',
+        name: 'Meta Viewport Tag (Mobile-Friendly)',
         status: viewport ? 'pass' : 'fail',
-        error: viewport ? null : 'Missing <meta name="viewport"> — page may not be mobile-friendly',
+        error: vpDetail,
         severity: 'major'
     });
 
@@ -252,19 +370,19 @@ class FunctionalEngine:
                     if resp.status_code >= 400:
                         failures.append(
                             FunctionalResult(
-                                test_name="check_links",
+                                test_name="Broken Link Detected",
                                 status="fail",
                                 severity="minor",
-                                error_message=f"HTTP {resp.status_code} for {url}",
+                                error_message=f"FAILED — HTTP {resp.status_code} for {url}",
                             )
                         )
                 except Exception as exc:
                     failures.append(
                         FunctionalResult(
-                            test_name="check_links",
+                            test_name="Broken Link Detected",
                             status="fail",
                             severity="minor",
-                            error_message=f"Request failed for {url}: {exc}",
+                            error_message=f"FAILED — Request failed for {url}: {exc}",
                         )
                     )
 
@@ -301,30 +419,32 @@ class FunctionalEngine:
             if not src:
                 failures.append(
                     FunctionalResult(
-                        test_name="check_images",
+                        test_name="Broken Image",
                         status="fail",
                         severity="major",
-                        error_message="Image has empty src attribute",
+                        error_message="FAILED — Image has empty src attribute. The <img> tag has no source URL.",
                     )
                 )
             elif complete and natural_width == 0:
+                short_src = src if len(src) <= 100 else "..." + src[-80:]
                 failures.append(
                     FunctionalResult(
-                        test_name="check_images",
+                        test_name="Broken Image",
                         status="fail",
                         severity="major",
-                        error_message=f"Image failed to load: {src}",
+                        error_message=f"FAILED — Image failed to load: {short_src}",
                     )
                 )
 
             # Missing alt text (accessibility issue)
             if src and not alt:
+                short_src = src if len(src) <= 100 else "..." + src[-80:]
                 failures.append(
                     FunctionalResult(
-                        test_name="check_images",
+                        test_name="Image Missing Alt Text",
                         status="fail",
                         severity="minor",
-                        error_message=f"Image missing alt text: {src}",
+                        error_message=f"FAILED — Image missing alt text: {short_src}",
                     )
                 )
 

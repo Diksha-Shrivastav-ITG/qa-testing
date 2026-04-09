@@ -80,6 +80,7 @@ class CaptureResult:
     source: str
     image_path: str
     status: str = "success"
+    css_data: str = ""  # JSON string of extracted CSS properties from key elements
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +168,7 @@ class CaptureEngine:
 
         for bp in breakpoints:
             try:
-                image_path = await self._take_screenshot(
+                image_path, css_data = await self._take_screenshot(
                     url=url,
                     page_name=page_name,
                     run_dir=run_dir,
@@ -182,13 +183,14 @@ class CaptureEngine:
                         breakpoint=bp,
                         source=source,
                         image_path=image_path,
+                        css_data=css_data,
                         status="success",
                     )
                 )
             except Exception:
                 # Retry once
                 try:
-                    image_path = await self._take_screenshot(
+                    image_path, css_data = await self._take_screenshot(
                         url=url,
                         page_name=page_name,
                         run_dir=run_dir,
@@ -203,6 +205,7 @@ class CaptureEngine:
                             breakpoint=bp,
                             source=source,
                             image_path=image_path,
+                            css_data=css_data,
                             status="success",
                         )
                     )
@@ -228,8 +231,8 @@ class CaptureEngine:
         breakpoint: int,
         password: str | None = None,
         wait_after_load_ms: int = 2000,
-    ) -> str:
-        """Launch Playwright, capture a full-page screenshot, and return the file path."""
+    ) -> tuple[str, str]:
+        """Launch Playwright, capture a full-page screenshot, and return (file_path, css_data_json)."""
         output_dir = os.path.join(self.storage_path, run_dir, source, page_name)
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, f"{breakpoint}.png")
@@ -296,6 +299,77 @@ class CaptureEngine:
             # Full-page screenshot
             await page.screenshot(path=output_path, full_page=True)
 
+            # Extract computed CSS from key elements
+            css_data = await page.evaluate("""() => {
+                const selectors = [
+                    // Headings
+                    'h1', 'h2', 'h3',
+                    // Navigation
+                    'nav', 'header',
+                    // Buttons/CTAs
+                    'a.btn, a.button, button.btn, button.button, .btn, .button, [class*="cta"], [class*="CTA"]',
+                    // Hero/banner
+                    '[class*="hero"], [class*="banner"], [class*="Hero"], [class*="Banner"]',
+                    // Sections
+                    'main > section, main > div > section, [class*="section"], [class*="Section"]',
+                    // Paragraphs (first few)
+                    'p',
+                    // Footer
+                    'footer',
+                    // Links in nav
+                    'nav a',
+                ];
+
+                const results = [];
+                const seen = new Set();
+
+                for (const selectorGroup of selectors) {
+                    try {
+                        const els = document.querySelectorAll(selectorGroup);
+                        let count = 0;
+                        for (const el of els) {
+                            if (count >= 3) break; // max 3 per selector
+                            if (seen.has(el)) continue;
+                            seen.add(el);
+
+                            const cs = window.getComputedStyle(el);
+                            const rect = el.getBoundingClientRect();
+                            if (rect.width === 0 || rect.height === 0) continue;
+
+                            const tag = el.tagName.toLowerCase();
+                            const cls = el.className ? String(el.className).slice(0, 80) : '';
+                            const text = (el.textContent || '').trim().slice(0, 50);
+
+                            results.push({
+                                tag: tag,
+                                class: cls,
+                                text: text,
+                                y: Math.round(rect.top + window.scrollY),
+                                width: Math.round(rect.width),
+                                height: Math.round(rect.height),
+                                fontSize: cs.fontSize,
+                                fontWeight: cs.fontWeight,
+                                fontFamily: cs.fontFamily.split(',')[0].trim().replace(/['"]/g, ''),
+                                lineHeight: cs.lineHeight,
+                                letterSpacing: cs.letterSpacing,
+                                color: cs.color,
+                                backgroundColor: cs.backgroundColor,
+                                padding: cs.padding,
+                                margin: cs.margin,
+                                borderRadius: cs.borderRadius,
+                                border: cs.border,
+                                gap: cs.gap,
+                            });
+                            count++;
+                        }
+                    } catch(e) {}
+                }
+
+                // Sort by Y position (top to bottom)
+                results.sort((a, b) => a.y - b.y);
+                return JSON.stringify(results.slice(0, 40)); // max 40 elements
+            }""")
+
             await browser.close()
 
-        return output_path
+        return output_path, css_data

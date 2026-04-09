@@ -190,3 +190,50 @@ def test_delete_run(client: TestClient, developer_token: str):
         headers=auth_header(developer_token),
     )
     assert del_resp.status_code == 204, del_resp.text
+
+
+def test_start_run_with_page_configs(client: TestClient, developer_token: str):
+    """Start a run with per-page configs via JSON body -> 201, page_configs stored."""
+    project_id = _create_project(client, developer_token)
+    body = {
+        "page_configs": [
+            {
+                "label": "Collection Pages",
+                "mode": "design",
+                "shopify_url": "/collections/summer",
+                "reference_url": "https://my-preview.vercel.app/collections",
+            },
+            {
+                "label": "Product Pages",
+                "mode": "ai",
+                "shopify_url": "/products/boot-1",
+            },
+        ],
+        "test_types": ["qa", "functional"],
+    }
+    resp = client.post(
+        f"/api/projects/{project_id}/runs",
+        json=body,
+        headers=auth_header(developer_token),
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["status"] == "running"
+    assert data["page_configs"] is not None
+    assert len(data["page_configs"]) == 2
+    assert data["page_configs"][0]["mode"] == "design"
+    assert data["page_configs"][0]["reference_url"] == "https://my-preview.vercel.app/collections"
+    assert data["page_configs"][1]["mode"] == "ai"
+    assert data["page_configs"][1].get("reference_url") is None
+
+
+def test_start_run_full_qa_no_body(client: TestClient, developer_token: str):
+    """Start a Full QA run without JSON body (legacy query params) -> 201, page_configs=None."""
+    project_id = _create_project(client, developer_token)
+    resp = client.post(
+        f"/api/projects/{project_id}/runs",
+        headers=auth_header(developer_token),
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["page_configs"] is None
