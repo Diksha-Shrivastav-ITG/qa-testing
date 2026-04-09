@@ -316,6 +316,138 @@ async () => {
         });
     }
 
+    // 17. Google Ads Tag
+    const googleAdsIds = new Set();
+    allScripts.forEach(s => {
+        const text = (s.src || '') + (s.textContent || '');
+        const matches = text.match(/AW-[0-9]+/g);
+        if (matches) matches.forEach(id => googleAdsIds.add(id));
+    });
+    const adsIdList = Array.from(googleAdsIds);
+    const hasGoogleAds = adsIdList.length > 0;
+    const hasAdsConversion = allScripts.some(s => {
+        const text = s.textContent || '';
+        return text.includes("'conversion'") && text.includes('AW-');
+    });
+
+    if (!hasGoogleAds) {
+        results.seo.push({
+            test: 'google_ads_check', label: 'Google Ads Tag', pass: false,
+            value: '(not installed)',
+            recommendation: 'No Google Ads tag detected. Install Google Ads conversion tracking if running paid campaigns.',
+            severity: 'minor',
+        });
+    } else {
+        results.seo.push({
+            test: 'google_ads_check', label: 'Google Ads Tag', pass: true,
+            value: adsIdList.join(', ') + (hasAdsConversion ? ' — conversion tracking active' : ' — no conversion events found'),
+            recommendation: hasAdsConversion ? null : 'Google Ads tag found but no conversion events detected. Set up conversion tracking to optimize campaigns.',
+            severity: hasAdsConversion ? null : 'minor',
+        });
+    }
+
+    // 18. Google Tag (gtag.js)
+    const gtagScriptEl = allScripts.find(s => s.src && s.src.includes('gtag/js'));
+    const hasGtagFunc = typeof window.gtag === 'function';
+    const hasDataLayerArr = Array.isArray(window.dataLayer);
+    const gtagInstalled = !!gtagScriptEl || hasGtagFunc;
+
+    const gtagConfigIds = new Set();
+    allScripts.forEach(s => {
+        const text = s.textContent || '';
+        const cfgIds = text.match(/['"](?:G|AW|DC)-[A-Z0-9]+['"]/g);
+        if (cfgIds) {
+            cfgIds.forEach(m => {
+                const clean = m.replace(/['"]/g, '');
+                gtagConfigIds.add(clean);
+            });
+        }
+    });
+    const gtagIdList = Array.from(gtagConfigIds);
+
+    if (!gtagInstalled) {
+        results.seo.push({
+            test: 'gtag_check', label: 'Google Tag (gtag.js)', pass: false,
+            value: '(not installed)',
+            recommendation: 'Install Google Tag (gtag.js) to enable Google Analytics, Ads, and other Google services tracking.',
+            severity: 'major',
+        });
+    } else {
+        results.seo.push({
+            test: 'gtag_check', label: 'Google Tag (gtag.js)', pass: true,
+            value: 'Active' + (gtagIdList.length > 0 ? ' — Configs: ' + gtagIdList.join(', ') : '') + (hasDataLayerArr ? ', dataLayer initialized' : ''),
+            recommendation: null, severity: null,
+        });
+    }
+
+    // 19. Facebook/Meta Pixel
+    const hasFbq = typeof window.fbq === 'function';
+    const hasFbPixelScript = allScripts.some(s =>
+        s.src && (s.src.includes('fbevents.js') || s.src.includes('connect.facebook.net'))
+    );
+    const fbPixelIds = new Set();
+    allScripts.forEach(s => {
+        const text = s.textContent || '';
+        if (text.includes('fbq')) {
+            const initMatches = text.match(/fbq *\( *['"]init['"] *, *['"]([0-9]+)['"]/g);
+            if (initMatches) {
+                initMatches.forEach(m => {
+                    const idMatch = m.match(/['"]([0-9]{6,20})['"]/);
+                    if (idMatch) fbPixelIds.add(idMatch[1]);
+                });
+            }
+        }
+    });
+    const fbIdList = Array.from(fbPixelIds);
+    const fbDetected = hasFbq || hasFbPixelScript || fbIdList.length > 0;
+    const hasFbNoscript = noscripts.some(ns => ns.innerHTML.includes('facebook.com/tr'));
+    const hasFbPageView = allScripts.some(s => {
+        const text = s.textContent || '';
+        return text.includes('fbq') && text.includes('PageView');
+    });
+
+    if (!fbDetected) {
+        results.seo.push({
+            test: 'fb_pixel_check', label: 'Facebook/Meta Pixel', pass: false,
+            value: '(not installed)',
+            recommendation: 'Install Facebook/Meta Pixel to track conversions and build audiences for Facebook & Instagram ads.',
+            severity: 'minor',
+        });
+    } else if (!hasFbPageView) {
+        results.seo.push({
+            test: 'fb_pixel_check', label: 'Facebook/Meta Pixel', pass: false,
+            value: fbIdList.length > 0 ? 'Pixel ' + fbIdList[0] + ' found but PageView not tracking' : 'Pixel found but PageView not tracking',
+            recommendation: 'Facebook Pixel is installed but PageView event is not firing. Verify fbq("track", "PageView") is called.',
+            severity: 'major',
+        });
+    } else {
+        results.seo.push({
+            test: 'fb_pixel_check', label: 'Facebook/Meta Pixel', pass: true,
+            value: (fbIdList.length > 0 ? 'Pixel ' + fbIdList[0] : 'Pixel active') + ', PageView tracking' + (hasFbNoscript ? ', noscript present' : ''),
+            recommendation: null, severity: null,
+        });
+    }
+
+    // Sub-warning: multiple Facebook pixels
+    if (fbIdList.length > 1) {
+        results.seo.push({
+            test: 'fb_pixel_duplicates', label: 'Facebook Pixel Duplicates', pass: false,
+            value: 'Multiple pixels: ' + fbIdList.join(', '),
+            recommendation: 'Multiple Facebook Pixels detected. Use a single pixel to avoid double-counting conversion events.',
+            severity: 'minor',
+        });
+    }
+
+    // Sub-warning: missing Facebook noscript fallback
+    if (fbDetected && !hasFbNoscript) {
+        results.seo.push({
+            test: 'fb_pixel_noscript', label: 'Facebook Pixel Noscript', pass: false,
+            value: 'Missing <noscript> fallback for Facebook Pixel',
+            recommendation: 'Add the Facebook Pixel noscript <img> tag for tracking in non-JavaScript environments.',
+            severity: 'minor',
+        });
+    }
+
     // ===================== ASYNC RESOURCE CHECKS =====================
 
     let sitemapOk = false;
@@ -334,6 +466,19 @@ async () => {
         const bingAuthResp = await fetch('/BingSiteAuth.xml', { method: 'HEAD', signal: bingAc.signal });
         clearTimeout(bingTimer);
         bingSiteAuthOk = bingAuthResp.ok;
+    } catch(e) {}
+
+    let robotsTxtOk = false;
+    let robotsTxtContent = '';
+    try {
+        const robotsAc = new AbortController();
+        const robotsTimer = setTimeout(() => robotsAc.abort(), 5000);
+        const robotsResp = await fetch('/robots.txt', { signal: robotsAc.signal });
+        clearTimeout(robotsTimer);
+        robotsTxtOk = robotsResp.ok;
+        if (robotsTxtOk) {
+            robotsTxtContent = (await robotsResp.text()).substring(0, 2000);
+        }
     } catch(e) {}
 
     // 15. Google Search Console (GSC)
@@ -415,6 +560,94 @@ async () => {
             recommendation: 'Add a BingSiteAuth.xml file to the site root as an alternative verification method for Bing',
             severity: 'minor',
         });
+    }
+
+    // 20. Tracking Tags Overview
+    const trackingTags = [];
+    if (hasGtm) trackingTags.push('GTM' + (gtmIdList.length > 0 ? ' (' + gtmIdList[0] + ')' : ''));
+    if (ga4Detected) trackingTags.push('GA4' + (ga4IdList.length > 0 ? ' (' + ga4IdList[0] + ')' : ''));
+    if (hasGoogleAds) trackingTags.push('Google Ads (' + adsIdList[0] + ')');
+    if (gtagInstalled) trackingTags.push('gtag.js');
+    if (fbDetected) trackingTags.push('FB Pixel' + (fbIdList.length > 0 ? ' (' + fbIdList[0] + ')' : ''));
+
+    const hasHotjar = allScripts.some(s => (s.src || '').includes('hotjar.com') || (s.textContent || '').includes('hotjar'));
+    if (hasHotjar) trackingTags.push('Hotjar');
+    const hasClarity = allScripts.some(s => (s.src || '').includes('clarity.ms'));
+    if (hasClarity) trackingTags.push('Microsoft Clarity');
+    const hasPinterest = allScripts.some(s => (s.textContent || '').includes('pintrk') || (s.src || '').includes('pinimg.com'));
+    if (hasPinterest) trackingTags.push('Pinterest Tag');
+    const hasTikTok = allScripts.some(s => (s.textContent || '').includes('ttq.load') || (s.src || '').includes('tiktok.com'));
+    if (hasTikTok) trackingTags.push('TikTok Pixel');
+    const hasSnapchat = allScripts.some(s => (s.textContent || '').includes('snaptr') || (s.src || '').includes('sc-static.net'));
+    if (hasSnapchat) trackingTags.push('Snapchat Pixel');
+    const hasLinkedIn = allScripts.some(s => (s.src || '').includes('snap.licdn.com') || (s.textContent || '').includes('_linkedin_partner_id'));
+    if (hasLinkedIn) trackingTags.push('LinkedIn Insight');
+    const hasTwitter = allScripts.some(s => (s.src || '').includes('static.ads-twitter.com') || (s.textContent || '').includes('twq('));
+    if (hasTwitter) trackingTags.push('Twitter/X Pixel');
+    const hasKlaviyo = allScripts.some(s => (s.src || '').includes('klaviyo.com'));
+    if (hasKlaviyo) trackingTags.push('Klaviyo');
+
+    results.seo.push({
+        test: 'tracking_tags_overview', label: 'Tracking Tags Overview',
+        pass: trackingTags.length > 0,
+        value: trackingTags.length > 0
+            ? trackingTags.length + ' tag(s): ' + trackingTags.join(' | ')
+            : '(no tracking tags detected)',
+        recommendation: trackingTags.length === 0
+            ? 'No tracking tags found. Install Google Analytics and a marketing pixel at minimum for analytics.'
+            : null,
+        severity: trackingTags.length === 0 ? 'critical' : null,
+    });
+
+    // 21. Sitemap Status
+    if (!sitemapOk) {
+        results.seo.push({
+            test: 'sitemap_status', label: 'Sitemap (sitemap.xml)', pass: false,
+            value: '/sitemap.xml not found or inaccessible',
+            recommendation: 'Create and submit a sitemap.xml to help search engines discover and index all your pages.',
+            severity: 'major',
+        });
+    } else {
+        results.seo.push({
+            test: 'sitemap_status', label: 'Sitemap (sitemap.xml)', pass: true,
+            value: '/sitemap.xml is accessible',
+            recommendation: null, severity: null,
+        });
+    }
+
+    // 22. robots.txt Status
+    if (!robotsTxtOk) {
+        results.seo.push({
+            test: 'robots_txt_status', label: 'robots.txt', pass: false,
+            value: '/robots.txt not found or inaccessible',
+            recommendation: 'Create a robots.txt file to control search engine crawling and include a Sitemap directive.',
+            severity: 'major',
+        });
+    } else {
+        const rtLower = robotsTxtContent.toLowerCase();
+        const hasSitemapDir = rtLower.includes('sitemap:');
+        const robotsLines = robotsTxtContent.split('\\n');
+        const hasDisallowAll = robotsLines.some(function(line) {
+            var parts = line.trim().split(':');
+            if (parts.length < 2) return false;
+            return parts[0].trim().toLowerCase() === 'disallow' && parts.slice(1).join(':').trim() === '/';
+        });
+
+        if (hasDisallowAll) {
+            results.seo.push({
+                test: 'robots_txt_status', label: 'robots.txt', pass: false,
+                value: 'WARNING: "Disallow: /" blocks all search engine crawling',
+                recommendation: 'Your robots.txt blocks all crawling. Remove "Disallow: /" unless this is intentional for a staging site.',
+                severity: 'critical',
+            });
+        } else {
+            results.seo.push({
+                test: 'robots_txt_status', label: 'robots.txt', pass: true,
+                value: 'Accessible' + (hasSitemapDir ? ', includes Sitemap directive' : ', no Sitemap directive'),
+                recommendation: hasSitemapDir ? null : 'Add a "Sitemap:" directive to robots.txt pointing to your sitemap.xml for better discoverability.',
+                severity: hasSitemapDir ? null : 'minor',
+            });
+        }
     }
 
     // ===================== PERFORMANCE CHECKS =====================

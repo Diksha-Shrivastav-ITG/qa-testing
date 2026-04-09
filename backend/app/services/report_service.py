@@ -536,12 +536,44 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
         for sr in seo_results:
             by_page_seo[sr.page or "home"].append(sr)
 
+        # Category mapping for organized SEO report display
+        _seo_category = {
+            'title_tag': 'On-Page SEO', 'meta_description': 'On-Page SEO', 'h1_tag': 'On-Page SEO',
+            'heading_hierarchy': 'On-Page SEO', 'canonical_url': 'On-Page SEO', 'meta_viewport': 'On-Page SEO',
+            'open_graph': 'On-Page SEO', 'image_alt': 'On-Page SEO', 'structured_data': 'On-Page SEO',
+            'robots_meta': 'On-Page SEO', 'internal_links': 'On-Page SEO', 'https': 'On-Page SEO',
+            'gtm_check': 'Tracking & Marketing Tags', 'gtm_noscript': 'Tracking & Marketing Tags',
+            'gtm_duplicates': 'Tracking & Marketing Tags', 'ga4_check': 'Tracking & Marketing Tags',
+            'ga4_duplicates': 'Tracking & Marketing Tags', 'google_ads_check': 'Tracking & Marketing Tags',
+            'gtag_check': 'Tracking & Marketing Tags', 'fb_pixel_check': 'Tracking & Marketing Tags',
+            'fb_pixel_duplicates': 'Tracking & Marketing Tags', 'fb_pixel_noscript': 'Tracking & Marketing Tags',
+            'tracking_tags_overview': 'Tracking & Marketing Tags',
+            'gsc_check': 'Search Engine Verification', 'bing_webmaster_check': 'Search Engine Verification',
+            'bing_siteauth': 'Search Engine Verification',
+            'sitemap_status': 'Site Configuration', 'robots_txt_status': 'Site Configuration',
+        }
+        _cat_icons = {
+            'On-Page SEO': '&#128221;', 'Tracking & Marketing Tags': '&#127991;',
+            'Search Engine Verification': '&#128279;', 'Site Configuration': '&#9881;',
+        }
+
         seo_sub_html = ""
         for page, page_srs in by_page_seo.items():
             page_label = _page_label(page)
             rows = ""
+            last_cat = None
             for sr in page_srs:
-                icon = "✅" if sr.passed else "❌"
+                cat = _seo_category.get(sr.test, 'Other')
+                if cat != last_cat:
+                    cat_icon = _cat_icons.get(cat, '&#128203;')
+                    rows += f"""
+                <tr>
+                  <td colspan="3" style="padding:14px 8px 6px;font-size:0.78rem;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:0.05em;border-bottom:2px solid #e0e7ff;">
+                    {cat_icon} {cat}
+                  </td>
+                </tr>"""
+                    last_cat = cat
+                icon = "&#9989;" if sr.passed else "&#10060;"
                 rec = f'<div style="font-size:0.75rem;color:#d97706;margin-top:2px;">{_esc(sr.recommendation)}</div>' if sr.recommendation else ""
                 sev_html = ""
                 if sr.severity and not sr.passed:
