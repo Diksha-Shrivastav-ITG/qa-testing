@@ -36,40 +36,8 @@ interface RunQAModalProps {
   sourceType: string;
 }
 
-/** Parse a URL string (which may contain multiple lines) into path(s) */
-function parseUrls(url: string): string[] {
-  const paths: string[] = [];
-  // Split by newlines to handle textarea multi-line input
-  const lines = url.split(/\n/).map((l) => l.trim()).filter(Boolean);
-  for (const line of lines) {
-    try {
-      const parsed = new URL(line);
-      paths.push(parsed.pathname);
-    } catch {
-      paths.push(line.startsWith("/") ? line : `/${line}`);
-    }
-  }
-  return paths;
-}
 
-/** Collect page paths from the pages array (used for Full QA tab) */
-function collectPagePaths(fullQA: boolean, pages: PageEntry[]): string {
-  if (fullQA) return "";
-  const allPaths: string[] = [];
-  for (const page of pages) {
-    if (!page.enabled) continue;
-    const url = page.shopifyUrl.trim();
-    if (!url) {
-      if (page.label === "Homepage") allPaths.push("/");
-      else if (page.label === "Collection Pages") allPaths.push("/collections");
-      else if (page.label === "Product Pages") allPaths.push("/products");
-      else allPaths.push("__other__");
-    } else {
-      allPaths.push(...parseUrls(url));
-    }
-  }
-  return allPaths.join(",");
-}
+
 
 const RunQAModal = ({ onConfirm, onCancel, isLoading, sourceType }: RunQAModalProps) => {
   const isAIProject = sourceType === "none";
@@ -163,9 +131,43 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, sourceType }: RunQAModalPr
     const projectTestMode: "design" | "ai" = isAIProject ? "ai" : "design";
 
     if (modalTab === "full") {
-      // Full QA: use legacy path — send pages + global test mode
-      const pageArg = collectPagePaths(fullQA, pages);
-      onConfirm(undefined, projectTestMode, undefined, pageArg);
+      if (fullQA) {
+        // Full QA with auto-discover: use legacy path — global test mode applies to all
+        onConfirm(undefined, projectTestMode, undefined, "");
+      } else {
+        // Full QA with manual pages: build page_configs so per-page modes are respected
+        const configs: PageConfig[] = [];
+        for (const p of pages) {
+          if (!p.enabled) continue;
+          const mode = isAIProject ? "ai" as const : p.mode;
+          const rawUrl = p.shopifyUrl.trim();
+          const rawRef = (p.referenceUrl || "").trim();
+          const isDesign = !isAIProject && p.mode === "design";
+          if (p.label === "Homepage" || !rawUrl.includes("\n")) {
+            configs.push({
+              label: p.label,
+              mode,
+              shopifyUrl: rawUrl || (p.label === "Homepage" ? "/" : ""),
+              referenceUrl: isDesign ? rawRef || undefined : undefined,
+            });
+          } else {
+            const urls = rawUrl.split(/\n/).map((l) => l.trim()).filter(Boolean);
+            const refUrls = rawRef ? rawRef.split(/\n/).map((l) => l.trim()).filter(Boolean) : [];
+            for (let i = 0; i < urls.length; i++) {
+              const matchedRef = refUrls.length > 0
+                ? (refUrls[i] || refUrls[refUrls.length - 1])
+                : undefined;
+              configs.push({
+                label: p.label,
+                mode,
+                shopifyUrl: urls[i],
+                referenceUrl: isDesign ? matchedRef : undefined,
+              });
+            }
+          }
+        }
+        onConfirm(configs, projectTestMode, undefined);
+      }
     } else {
       // Customize: build per-page configs — expand multi-line URLs into separate configs
       const configs: PageConfig[] = [];
