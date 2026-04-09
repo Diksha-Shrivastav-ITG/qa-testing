@@ -159,9 +159,10 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
     section_num = 0
 
     # ── SECTIONS: Issues grouped by PAGE (matching frontend) ──
-    # Group ALL issues by page first, then by type within each page
+    # Group non-functional issues by page (functional issues have their own section)
+    non_functional_issues = [i for i in issues if i.type != IssueType.functional]
     all_issues_by_page: dict[str, list[Issue]] = defaultdict(list)
-    for issue in issues:
+    for issue in non_functional_issues:
         all_issues_by_page[issue.page or "home"].append(issue)
 
     # Sort pages: homepage first, then alphabetical
@@ -173,9 +174,8 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
         section_num += 1
         page_label = _page_label(page)
 
-        # Split by type within this page
+        # Split by type within this page (functional excluded — shown in separate section)
         page_visual = [i for i in page_all_issues if i.type == IssueType.visual]
-        page_functional = [i for i in page_all_issues if i.type == IssueType.functional]
         page_content = [i for i in page_all_issues if i.type == IssueType.content] if hasattr(IssueType, "content") else []
 
         sub_html = ""
@@ -244,37 +244,6 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
             <div class="subsection">
               <h3 class="sub-title"><span class="sec-icon">🎨</span> {section_num}.{sub_num} Visual Design</h3>
               <p style="color:#16a34a;font-size:0.85rem;font-family:-apple-system,sans-serif;padding:0.5rem 0;">✅ No visual design issues found</p>
-            </div>"""
-
-        # Functional issues for this page
-        sub_num += 1
-        if page_functional:
-            issue_items_html = ""
-            for n, issue in enumerate(page_functional, 1):
-                sev = issue.severity.value if hasattr(issue.severity, "value") else str(issue.severity)
-                title = _title_from_description(issue.description)
-                issue_items_html += f"""
-                <div class="issue-block" style="border-left:4px solid {SEV_COLORS.get(sev,'#999')};background:{SEV_BG.get(sev,'#f9fafb')};">
-                  <div class="issue-header-row">
-                    <span class="issue-label">Issue {section_num}.{sub_num}.{n}</span>
-                    <span class="sev-pill" style="background:{SEV_COLORS.get(sev,'#999')};">{sev.upper()}</span>
-                  </div>
-                  <p class="issue-title">{title}</p>
-                  <ul class="issue-meta">
-                    <li><strong>Observation:</strong> {issue.description}</li>
-                    <li><strong>Expected Result:</strong> {issue.ai_suggestion or 'This functionality should work as designed.'}</li>
-                  </ul>
-                </div>"""
-            sub_html += f"""
-            <div class="subsection">
-              <h3 class="sub-title"><span class="sec-icon">⚙️</span> {section_num}.{sub_num} Functional — {len(page_functional)} Issue{"s" if len(page_functional)!=1 else ""}</h3>
-              {issue_items_html}
-            </div>"""
-        else:
-            sub_html += f"""
-            <div class="subsection">
-              <h3 class="sub-title"><span class="sec-icon">⚙️</span> {section_num}.{sub_num} Functional</h3>
-              <p style="color:#16a34a;font-size:0.85rem;font-family:-apple-system,sans-serif;padding:0.5rem 0;">✅ No functional issues found</p>
             </div>"""
 
         # Content issues for this page
