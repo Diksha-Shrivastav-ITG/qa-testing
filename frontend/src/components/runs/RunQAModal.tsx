@@ -173,23 +173,31 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, sourceType }: RunQAModalPr
         if (!p.enabled) continue;
         const mode = isAIProject ? "ai" as const : p.mode;
         const rawUrl = p.shopifyUrl.trim();
+        const rawRef = (p.referenceUrl || "").trim();
+        const isDesign = !isAIProject && p.mode === "design";
         // For Homepage or single-line URLs, create one config
         if (p.label === "Homepage" || !rawUrl.includes("\n")) {
           configs.push({
             label: p.label,
             mode,
             shopifyUrl: rawUrl || (p.label === "Homepage" ? "/" : ""),
-            referenceUrl: !isAIProject && p.mode === "design" ? p.referenceUrl : undefined,
+            referenceUrl: isDesign ? rawRef || undefined : undefined,
           });
         } else {
-          // Multi-line: create one config per URL
+          // Multi-line: create one config per URL, pair with reference URLs line by line
           const urls = rawUrl.split(/\n/).map((l) => l.trim()).filter(Boolean);
-          for (const url of urls) {
+          const refUrls = rawRef ? rawRef.split(/\n/).map((l) => l.trim()).filter(Boolean) : [];
+          for (let i = 0; i < urls.length; i++) {
+            // Pair each Shopify URL with the corresponding reference URL line
+            // If fewer reference URLs, reuse the last one
+            const matchedRef = refUrls.length > 0
+              ? (refUrls[i] || refUrls[refUrls.length - 1])
+              : undefined;
             configs.push({
               label: p.label,
               mode,
-              shopifyUrl: url,
-              referenceUrl: !isAIProject && p.mode === "design" ? p.referenceUrl : undefined,
+              shopifyUrl: urls[i],
+              referenceUrl: isDesign ? matchedRef : undefined,
             });
           }
         }
@@ -318,16 +326,33 @@ const RunQAModal = ({ onConfirm, onCancel, isLoading, sourceType }: RunQAModalPr
                   {showModeSelector && !isAIProject && page.mode === "design" && (
                     <div>
                       <label htmlFor={`ref-url-${idx}`} className="text-xs font-medium text-gray-500 dark:text-slate-400">
-                        Reference URL <span className="text-gray-400 dark:text-slate-500">(Vercel, staging, HTML — any URL)</span>
+                        Reference URL{page.label !== "Homepage" ? "s (one per line, matching Shopify URLs)" : ""} <span className="text-gray-400 dark:text-slate-500">(Vercel, staging, HTML — any URL)</span>
                       </label>
-                      <input
-                        id={`ref-url-${idx}`}
-                        type="url"
-                        value={page.referenceUrl}
-                        onChange={(e) => updatePageField(idx, "referenceUrl", e.target.value)}
-                        placeholder="https://my-preview.vercel.app/collections"
-                        className="mt-1 w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500"
-                      />
+                      {page.label === "Homepage" ? (
+                        <input
+                          id={`ref-url-${idx}`}
+                          type="url"
+                          value={page.referenceUrl}
+                          onChange={(e) => updatePageField(idx, "referenceUrl", e.target.value)}
+                          placeholder="https://my-preview.vercel.app"
+                          className="mt-1 w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500"
+                        />
+                      ) : (
+                        <textarea
+                          id={`ref-url-${idx}`}
+                          value={page.referenceUrl}
+                          onChange={(e) => updatePageField(idx, "referenceUrl", e.target.value)}
+                          placeholder={
+                            page.label === "Collection Pages"
+                              ? "https://my-preview.vercel.app/collections/summer\nhttps://my-preview.vercel.app/collections/winter"
+                              : page.label === "Product Pages"
+                              ? "https://my-preview.vercel.app/products/boot-1\nhttps://my-preview.vercel.app/products/sneaker-2"
+                              : "https://my-preview.vercel.app/pages/about\nhttps://my-preview.vercel.app/pages/contact"
+                          }
+                          rows={3}
+                          className="mt-1 w-full px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500 resize-y"
+                        />
+                      )}
                     </div>
                   )}
                 </div>

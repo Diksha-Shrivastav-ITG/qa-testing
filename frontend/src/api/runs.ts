@@ -62,5 +62,8 @@ export const getSeo = (runId: number) =>
 export const getPerformance = (runId: number) =>
   api.get(`/api/runs/${runId}/performance`);
 
+export const getFunctional = (runId: number) =>
+  api.get(`/api/runs/${runId}/functional`);
+
 export const getComparisons = (runId: number) =>
   api.get(`/api/runs/${runId}/comparisons`);

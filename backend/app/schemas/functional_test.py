@@ -14,5 +14,6 @@ class FunctionalTestResponse(BaseModel):
     step_failed: Optional[str] = None
     error_message: Optional[str] = None
     screenshot_path: Optional[str] = None
+    page: Optional[str] = None
 
     model_config = {"from_attributes": True}

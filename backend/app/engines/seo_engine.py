@@ -31,7 +31,9 @@ async () => {
         test: 'title_tag',
         label: 'Page Title',
         pass: title.length > 0 && title.length <= 60,
-        value: title || '(empty)',
+        value: title
+            ? title + ' (' + title.length + '/60 chars)'
+            : '(empty — no title tag found)',
         recommendation: title.length === 0
             ? 'Add a <title> tag — essential for SEO'
             : title.length > 60
@@ -47,7 +49,9 @@ async () => {
         test: 'meta_description',
         label: 'Meta Description',
         pass: descContent.length >= 50 && descContent.length <= 160,
-        value: descContent ? descContent.substring(0, 80) + (descContent.length > 80 ? '...' : '') : '(missing)',
+        value: descContent
+            ? descContent + ' (' + descContent.length + '/160 chars)'
+            : '(missing — no meta description tag found)',
         recommendation: !descContent
             ? 'Add a meta description — important for click-through rates'
             : descContent.length < 50
@@ -60,11 +64,20 @@ async () => {
 
     // 3. H1 tag
     const h1s = document.querySelectorAll('h1');
+    let h1Value = '';
+    if (h1s.length === 0) {
+        h1Value = '(none — no H1 heading found on page)';
+    } else if (h1s.length === 1) {
+        h1Value = 'H1: "' + h1s[0].textContent.trim().substring(0, 100) + '"';
+    } else {
+        const h1Texts = Array.from(h1s).map((h, i) => 'H1 #' + (i + 1) + ': "' + h.textContent.trim().substring(0, 100) + '"');
+        h1Value = h1s.length + ' H1 tags found (should be exactly 1)\\n' + h1Texts.join('\\n');
+    }
     results.seo.push({
         test: 'h1_tag',
         label: 'H1 Heading',
         pass: h1s.length === 1,
-        value: h1s.length === 0 ? '(none)' : h1s.length === 1 ? h1s[0].textContent.trim().substring(0, 60) : `${h1s.length} H1 tags found`,
+        value: h1Value,
         recommendation: h1s.length === 0
             ? 'Add an H1 heading — critical for SEO'
             : h1s.length > 1
@@ -77,27 +90,43 @@ async () => {
     const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6'));
     let hierarchyOk = true;
     let lastLevel = 0;
+    let skippedFrom = '';
+    let skippedTo = '';
+    const headingDetails = [];
     for (const h of headings) {
         const level = parseInt(h.tagName[1]);
-        if (level > lastLevel + 1 && lastLevel > 0) { hierarchyOk = false; break; }
+        const text = h.textContent.trim().substring(0, 100) || '(empty)';
+        headingDetails.push('H' + level + ': ' + text);
+        if (level > lastLevel + 1 && lastLevel > 0 && skippedFrom === '') {
+            hierarchyOk = false;
+            skippedFrom = 'H' + lastLevel;
+            skippedTo = 'H' + level;
+        }
         lastLevel = level;
     }
+    const headingList = headingDetails.join('\\n');
     results.seo.push({
         test: 'heading_hierarchy',
         label: 'Heading Hierarchy',
         pass: hierarchyOk,
-        value: hierarchyOk ? 'Correct order' : 'Skipped levels detected',
-        recommendation: hierarchyOk ? null : 'Headings skip levels (e.g. H1 → H3). Use H1 → H2 → H3 in order',
+        value: hierarchyOk
+            ? 'Correct order — ' + headings.length + ' heading(s) found\\n' + headingList
+            : 'Skipped levels detected (' + skippedFrom + ' → ' + skippedTo + ') — ' + headings.length + ' heading(s)\\n' + headingList,
+        recommendation: hierarchyOk ? null : 'Headings skip levels (' + skippedFrom + ' → ' + skippedTo + '). Use H1 → H2 → H3 in order without skipping.',
         severity: hierarchyOk ? null : 'minor',
     });
 
     // 5. Canonical URL
     const canonical = document.querySelector('link[rel="canonical"]');
+    const canonicalHref = canonical ? (canonical.getAttribute('href') || '') : '';
+    const matchesCurrent = canonicalHref && (canonicalHref === window.location.href || canonicalHref === window.location.pathname);
     results.seo.push({
         test: 'canonical_url',
         label: 'Canonical URL',
         pass: !!canonical,
-        value: canonical ? canonical.getAttribute('href') : '(missing)',
+        value: canonical
+            ? 'Set to: ' + canonicalHref + (matchesCurrent ? ' (matches current page)' : ' (points to different URL)')
+            : '(missing — no canonical link tag found)',
         recommendation: canonical ? null : 'Add a canonical URL to prevent duplicate content issues',
         severity: canonical ? null : 'major',
     });
@@ -108,7 +137,7 @@ async () => {
         test: 'meta_viewport',
         label: 'Mobile Viewport',
         pass: !!viewport,
-        value: viewport ? 'Present' : '(missing)',
+        value: viewport ? 'Present — ' + (viewport.getAttribute('content') || '') : '(missing — no viewport meta tag found)',
         recommendation: viewport ? null : 'Add <meta name="viewport"> for mobile-friendly pages',
         severity: viewport ? null : 'major',
     });
@@ -118,11 +147,18 @@ async () => {
     const ogDesc = document.querySelector('meta[property="og:description"]');
     const ogImage = document.querySelector('meta[property="og:image"]');
     const ogCount = [ogTitle, ogDesc, ogImage].filter(Boolean).length;
+    const ogDetails = [];
+    if (ogTitle) ogDetails.push('og:title: ' + (ogTitle.getAttribute('content') || '').substring(0, 100));
+    else ogDetails.push('og:title: (missing)');
+    if (ogDesc) ogDetails.push('og:description: ' + (ogDesc.getAttribute('content') || '').substring(0, 120));
+    else ogDetails.push('og:description: (missing)');
+    if (ogImage) ogDetails.push('og:image: ' + (ogImage.getAttribute('content') || ''));
+    else ogDetails.push('og:image: (missing)');
     results.seo.push({
         test: 'open_graph',
         label: 'Open Graph Tags',
         pass: ogCount === 3,
-        value: `${ogCount}/3 tags present`,
+        value: ogCount + '/3 tags present\\n' + ogDetails.join('\\n'),
         recommendation: ogCount < 3
             ? `Missing: ${[!ogTitle && 'og:title', !ogDesc && 'og:description', !ogImage && 'og:image'].filter(Boolean).join(', ')}`
             : null,
@@ -132,22 +168,54 @@ async () => {
     // 8. Image alt text
     const imgs = Array.from(document.querySelectorAll('img'));
     const withoutAlt = imgs.filter(img => !img.alt && img.offsetWidth > 0);
+    let imgAltValue = '';
+    if (withoutAlt.length === 0) {
+        imgAltValue = 'All ' + imgs.length + ' images have alt text';
+    } else {
+        const missingSrcs = withoutAlt.slice(0, 20).map((img, i) => {
+            const src = img.src || img.getAttribute('data-src') || img.getAttribute('data-srcset') || '(no src)';
+            const shortSrc = src.length > 100 ? '...' + src.slice(-80) : src;
+            return (i + 1) + '. ' + shortSrc;
+        });
+        imgAltValue = withoutAlt.length + ' of ' + imgs.length + ' images missing alt text\\n' + missingSrcs.join('\\n');
+        if (withoutAlt.length > 20) imgAltValue += '\\n... and ' + (withoutAlt.length - 20) + ' more';
+    }
     results.seo.push({
         test: 'image_alt',
         label: 'Image Alt Text',
         pass: withoutAlt.length === 0,
-        value: withoutAlt.length === 0 ? `All ${imgs.length} images have alt` : `${withoutAlt.length} of ${imgs.length} missing alt`,
+        value: imgAltValue,
         recommendation: withoutAlt.length > 0 ? `Add alt text to ${withoutAlt.length} image(s) for SEO and accessibility` : null,
         severity: withoutAlt.length > 5 ? 'major' : withoutAlt.length > 0 ? 'minor' : null,
     });
 
     // 9. Schema / Structured data
     const schemas = document.querySelectorAll('script[type="application/ld+json"]');
+    let schemaValue = '';
+    if (schemas.length === 0) {
+        schemaValue = '(none — no JSON-LD structured data found)';
+    } else {
+        const schemaTypes = [];
+        schemas.forEach(s => {
+            try {
+                const data = JSON.parse(s.textContent);
+                if (Array.isArray(data)) {
+                    data.forEach(d => { if (d['@type']) schemaTypes.push(d['@type']); });
+                } else if (data['@type']) {
+                    schemaTypes.push(data['@type']);
+                } else if (data['@graph']) {
+                    data['@graph'].forEach(d => { if (d['@type']) schemaTypes.push(d['@type']); });
+                }
+            } catch(e) {}
+        });
+        schemaValue = schemas.length + ' schema(s) found';
+        if (schemaTypes.length > 0) schemaValue += '\\nTypes: ' + schemaTypes.join(', ');
+    }
     results.seo.push({
         test: 'structured_data',
         label: 'Structured Data (Schema.org)',
         pass: schemas.length > 0,
-        value: schemas.length > 0 ? `${schemas.length} schema(s) found` : '(none)',
+        value: schemaValue,
         recommendation: schemas.length === 0 ? 'Add JSON-LD structured data for rich search results' : null,
         severity: schemas.length === 0 ? 'minor' : null,
     });
@@ -169,11 +237,17 @@ async () => {
         const href = a.getAttribute('href') || '';
         return href.startsWith('/') || href.includes(window.location.hostname);
     });
+    let internalLinksValue = internalLinks.length + ' internal links found';
+    if (internalLinks.length > 0) {
+        const uniqueHrefs = [...new Set(internalLinks.map(a => a.getAttribute('href')))].slice(0, 30);
+        internalLinksValue += '\\n' + uniqueHrefs.join('\\n');
+        if (internalLinks.length > 30) internalLinksValue += '\\n... and more';
+    }
     results.seo.push({
         test: 'internal_links',
         label: 'Internal Links',
         pass: internalLinks.length >= 3,
-        value: `${internalLinks.length} internal links`,
+        value: internalLinksValue,
         recommendation: internalLinks.length < 3 ? 'Add more internal links to improve crawlability' : null,
         severity: internalLinks.length < 3 ? 'minor' : null,
     });
@@ -183,7 +257,9 @@ async () => {
         test: 'https',
         label: 'HTTPS',
         pass: window.location.protocol === 'https:',
-        value: window.location.protocol === 'https:' ? 'Secure' : 'NOT secure',
+        value: window.location.protocol === 'https:'
+            ? 'Secure — site is served over HTTPS (' + window.location.origin + ')'
+            : 'NOT secure — site is served over HTTP (' + window.location.origin + ')',
         recommendation: window.location.protocol !== 'https:' ? 'Switch to HTTPS — required for SEO ranking' : null,
         severity: window.location.protocol !== 'https:' ? 'critical' : null,
     });
@@ -451,12 +527,40 @@ async () => {
     // ===================== ASYNC RESOURCE CHECKS =====================
 
     let sitemapOk = false;
+    let sitemapUrls = [];
+    let sitemapSubFiles = [];
     try {
         const sitemapAc = new AbortController();
-        const sitemapTimer = setTimeout(() => sitemapAc.abort(), 5000);
-        const sitemapResp = await fetch('/sitemap.xml', { method: 'HEAD', signal: sitemapAc.signal });
+        const sitemapTimer = setTimeout(() => sitemapAc.abort(), 8000);
+        const sitemapResp = await fetch('/sitemap.xml', { signal: sitemapAc.signal });
         clearTimeout(sitemapTimer);
         sitemapOk = sitemapResp.ok;
+        if (sitemapOk) {
+            const sitemapText = await sitemapResp.text();
+            const isSitemapIndex = sitemapText.includes('<sitemapindex');
+            if (isSitemapIndex) {
+                const indexLocs = sitemapText.match(/<loc>([\\s\\S]*?)<\\/loc>/gi) || [];
+                sitemapSubFiles = indexLocs.map(m => m.replace(/<\\/?loc>/gi, '').trim());
+                const fetchPromises = sitemapSubFiles.slice(0, 10).map(async (subUrl) => {
+                    try {
+                        const ac = new AbortController();
+                        const t = setTimeout(() => ac.abort(), 5000);
+                        const r = await fetch(subUrl, { signal: ac.signal });
+                        clearTimeout(t);
+                        if (r.ok) {
+                            const txt = await r.text();
+                            return (txt.match(/<loc>([\\s\\S]*?)<\\/loc>/gi) || []).map(m => m.replace(/<\\/?loc>/gi, '').trim());
+                        }
+                    } catch(e) {}
+                    return [];
+                });
+                const allResults = await Promise.all(fetchPromises);
+                allResults.forEach(urls => { sitemapUrls.push(...urls); });
+            } else {
+                const locMatches = sitemapText.match(/<loc>([\\s\\S]*?)<\\/loc>/gi) || [];
+                sitemapUrls = locMatches.map(m => m.replace(/<\\/?loc>/gi, '').trim());
+            }
+        }
     } catch(e) {}
 
     let bingSiteAuthOk = false;
@@ -608,9 +712,20 @@ async () => {
             severity: 'major',
         });
     } else {
+        let sitemapDetail = '/sitemap.xml is accessible — ' + sitemapUrls.length + ' URL(s) found';
+        if (sitemapSubFiles.length > 0) {
+            sitemapDetail += ' across ' + sitemapSubFiles.length + ' sub-sitemap(s)';
+        }
+        const urlsToShow = sitemapUrls.slice(0, 500);
+        if (urlsToShow.length > 0) {
+            sitemapDetail += '\\n' + urlsToShow.join('\\n');
+        }
+        if (sitemapUrls.length > 500) {
+            sitemapDetail += '\\n... and ' + (sitemapUrls.length - 500) + ' more URLs';
+        }
         results.seo.push({
             test: 'sitemap_status', label: 'Sitemap (sitemap.xml)', pass: true,
-            value: '/sitemap.xml is accessible',
+            value: sitemapDetail,
             recommendation: null, severity: null,
         });
     }
@@ -636,14 +751,16 @@ async () => {
         if (hasDisallowAll) {
             results.seo.push({
                 test: 'robots_txt_status', label: 'robots.txt', pass: false,
-                value: 'WARNING: "Disallow: /" blocks all search engine crawling',
+                value: 'WARNING: "Disallow: /" blocks all search engine crawling\\n' + robotsTxtContent.substring(0, 1000),
                 recommendation: 'Your robots.txt blocks all crawling. Remove "Disallow: /" unless this is intentional for a staging site.',
                 severity: 'critical',
             });
         } else {
+            let robotsDetail = 'Accessible' + (hasSitemapDir ? ', includes Sitemap directive' : ', no Sitemap directive');
+            robotsDetail += '\\n' + robotsTxtContent.substring(0, 1000);
             results.seo.push({
                 test: 'robots_txt_status', label: 'robots.txt', pass: true,
-                value: 'Accessible' + (hasSitemapDir ? ', includes Sitemap directive' : ', no Sitemap directive'),
+                value: robotsDetail,
                 recommendation: hasSitemapDir ? null : 'Add a "Sitemap:" directive to robots.txt pointing to your sitemap.xml for better discoverability.',
                 severity: hasSitemapDir ? null : 'minor',
             });

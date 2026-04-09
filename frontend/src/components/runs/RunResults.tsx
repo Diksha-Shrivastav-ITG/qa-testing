@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getRun, getCaptures, getComparisons, getAccessibility, getLinkAudit, getSeo, getPerformance } from "../../api/runs";
+import { getRun, getCaptures, getComparisons, getAccessibility, getLinkAudit, getSeo, getPerformance, getFunctional } from "../../api/runs";
 import SideBySideViewer from "../comparison/SideBySideViewer";
 import { listIssues } from "../../api/issues";
 import { getProject } from "../../api/projects";
@@ -684,6 +684,107 @@ const LinkAuditSection = ({ items, sectionNum }: LinkSectionProps) => {
   );
 };
 
+// ---------- Functional Test Section ----------
+
+interface FunctionalItem {
+  id: number;
+  qa_run_id: number;
+  test_name: string;
+  status: string;
+  severity?: string;
+  step_failed?: string;
+  error_message?: string;
+  screenshot_path?: string;
+  page?: string;
+}
+
+const FunctionalValueDisplay = ({ value }: { value: string }) => {
+  const [expanded, setExpanded] = useState(false);
+  const lines = value.split("\n");
+
+  if (lines.length <= 1) {
+    return <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{value}</p>;
+  }
+
+  const summary = lines[0];
+  const details = lines.slice(1).filter((l) => l.trim());
+
+  return (
+    <div className="mt-0.5">
+      <p className="text-xs text-gray-500 dark:text-slate-400">{summary}</p>
+      {details.length > 0 && (
+        <>
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+            className="text-[10px] text-indigo-400 hover:text-indigo-300 mt-1 font-medium cursor-pointer"
+          >
+            {expanded ? "▲ Hide details" : `▼ Show details (${details.length} items)`}
+          </button>
+          {expanded && (
+            <div className="mt-1 max-h-48 overflow-y-auto text-[11px] text-gray-500 dark:text-slate-400 space-y-0.5 pl-2 border-l-2 border-gray-200 dark:border-slate-600">
+              {details.map((line, i) => (
+                <div key={i} className="py-0.5 break-all">{line}</div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+const FunctionalSection = ({ items, sectionNum }: { items: FunctionalItem[]; sectionNum: number }) => {
+  const passed = items.filter((i) => i.status === "pass").length;
+  const failed = items.filter((i) => i.status === "fail").length;
+  const grouped = groupBy(items, (i) => i.page || "home");
+
+  return (
+    <div className="border border-gray-200 dark:border-slate-700/60 rounded-2xl overflow-hidden">
+      <Collapsible
+        defaultOpen={false}
+        header={(open, toggle) => (
+          <button onClick={toggle} className="w-full flex items-center justify-between px-5 py-4 bg-gray-100 dark:bg-slate-700/40 hover:bg-gray-200 dark:hover:bg-slate-700/60 text-left border-b border-gray-200 dark:border-slate-700/60 transition-colors">
+            <div className="flex items-center gap-3">
+              <div className="w-7 h-7 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-sm">🧪</div>
+              <span className="font-semibold text-gray-900 dark:text-white text-sm">{sectionNum}. Functional Tests</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 font-semibold">{passed} passed</span>
+              {failed > 0 && <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/25 font-semibold">{failed} failed</span>}
+            </div>
+            <svg className={`w-4 h-4 text-gray-400 dark:text-slate-500 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
+          </button>
+        )}
+      >
+        <div className="p-4 space-y-4">
+          {Object.entries(grouped).map(([page, pageItems]) => (
+            <div key={page}>
+              <h4 className="text-[10px] font-semibold text-gray-500 dark:text-slate-500 uppercase tracking-widest mb-2">{pageLabel(page)}</h4>
+              <div className="space-y-1.5">
+                {pageItems.map((item) => (
+                  <div key={item.id} className={`flex items-start gap-3 px-3 py-2.5 rounded-xl text-sm border ${item.status === "pass" ? "bg-emerald-500/5 border-emerald-500/15" : "bg-red-500/5 border-red-500/15"}`}>
+                    <span className="mt-0.5 shrink-0">{item.status === "pass" ? "✅" : "❌"}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-800 dark:text-slate-200 text-xs">{item.test_name}</span>
+                        {item.severity && item.status === "fail" && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${sevStyle(item.severity)}`}>{item.severity}</span>
+                        )}
+                      </div>
+                      {item.error_message && <FunctionalValueDisplay value={item.error_message} />}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {items.length === 0 && <p className="text-sm text-gray-400 dark:text-slate-500 text-center py-4">No functional test data</p>}
+        </div>
+      </Collapsible>
+    </div>
+  );
+};
+
 // ---------- SEO Section ----------
 
 interface SeoItem {
@@ -696,6 +797,41 @@ interface SeoItem {
   recommendation?: string;
   severity?: string;
 }
+
+const SeoValueDisplay = ({ value }: { value: string }) => {
+  const [expanded, setExpanded] = useState(false);
+  const lines = value.split("\n");
+
+  if (lines.length <= 1) {
+    return <p className="text-xs text-gray-500 dark:text-slate-500 mt-0.5">{value}</p>;
+  }
+
+  const summary = lines[0];
+  const details = lines.slice(1).filter((l) => l.trim());
+
+  return (
+    <div className="mt-0.5">
+      <p className="text-xs text-gray-500 dark:text-slate-500">{summary}</p>
+      {details.length > 0 && (
+        <>
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+            className="text-[10px] text-indigo-400 hover:text-indigo-300 mt-1 font-medium cursor-pointer"
+          >
+            {expanded ? "▲ Hide details" : `▼ Show details (${details.length} items)`}
+          </button>
+          {expanded && (
+            <div className="mt-1 max-h-64 overflow-y-auto text-[11px] text-gray-500 dark:text-slate-400 space-y-0.5 pl-2 border-l-2 border-gray-200 dark:border-slate-600">
+              {details.map((line, i) => (
+                <div key={i} className="py-0.5 break-all">{line}</div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
 
 const SeoSection = ({ items, sectionNum }: { items: SeoItem[]; sectionNum: number }) => {
   const passed = items.filter((i) => i.passed).length;
@@ -735,7 +871,7 @@ const SeoSection = ({ items, sectionNum }: { items: SeoItem[]; sectionNum: numbe
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${sevStyle(item.severity)}`}>{item.severity}</span>
                         )}
                       </div>
-                      <p className="text-xs text-gray-500 dark:text-slate-500 mt-0.5">{item.value}</p>
+                      <SeoValueDisplay value={item.value} />
                       {item.recommendation && <p className="text-xs text-orange-400 mt-0.5">{item.recommendation}</p>}
                     </div>
                   </div>
@@ -1020,6 +1156,12 @@ const RunResults = ({ runId }: RunResultsProps) => {
     enabled: !!runId,
   });
 
+  const { data: functionalData } = useQuery<FunctionalItem[]>({
+    queryKey: ["functional", runId],
+    queryFn: () => getFunctional(runId).then((r) => r.data),
+    enabled: !!runId,
+  });
+
   // Fetch project for threshold
   const { data: projectData } = useQuery({
     queryKey: ["project", run?.project_id],
@@ -1067,6 +1209,7 @@ const RunResults = ({ runId }: RunResultsProps) => {
   const linkItems: LinkAuditItem[] = linkData ?? [];
   const seoItems: SeoItem[] = seoData ?? [];
   const perfItems: PerfItem[] = perfData ?? [];
+  const functionalItems: FunctionalItem[] = functionalData ?? [];
 
   // Group issues by page
   const issuesByPage = groupBy(issues, (i) => i.page ?? "home");
@@ -1090,6 +1233,7 @@ const RunResults = ({ runId }: RunResultsProps) => {
   // Determine which sections were actually run
   // test_types is null → Full QA → show everything
   const runTypes = run.test_types ? new Set(run.test_types.split(",")) : null;
+  const showFunctional = runTypes === null || runTypes.has("functional");
   const showAda = runTypes === null || runTypes.has("ada");
   const showLinkAudit = runTypes === null || runTypes.has("link_audit");
   const showSeo = runTypes === null || runTypes.has("seo");
@@ -1097,6 +1241,7 @@ const RunResults = ({ runId }: RunResultsProps) => {
 
   // Section numbering: pages first, then only sections that were run
   let sectionCounter = pagesWithIssues.length;
+  const functionalSectionNum = showFunctional ? ++sectionCounter : 0;
   const accSectionNum = showAda ? ++sectionCounter : 0;
   const linkSectionNum = showLinkAudit ? ++sectionCounter : 0;
   const seoSectionNum = showSeo ? ++sectionCounter : 0;
@@ -1244,53 +1389,7 @@ const RunResults = ({ runId }: RunResultsProps) => {
                   );
                 })()}
 
-                {/* Written differences for this page */}
-                {(() => {
-                  const pageIssues = issues.filter((i) => i.page === pageName);
-                  if (pageIssues.length === 0) return null;
-                  return (
-                    <div className="mt-6 border-t border-gray-200 dark:border-slate-700/60 pt-5">
-                      <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
-                        <svg className="w-4 h-4 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                        </svg>
-                        Differences Found ({pageIssues.length})
-                      </h4>
-                      <div className="space-y-3">
-                        {pageIssues.map((issue) => (
-                          <div
-                            key={issue.id}
-                            className="bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700/50 rounded-xl px-4 py-3"
-                          >
-                            <div className="flex items-start gap-3">
-                              <span className={`mt-0.5 shrink-0 text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
-                                SEVERITY_STYLES[issue.severity] ?? "bg-gray-500/10 text-gray-400 border border-gray-500/25"
-                              }`}>
-                                {issue.severity}
-                              </span>
-                              <div className="flex-1 min-w-0">
-                                {issue.element_selector && (
-                                  <p className="text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
-                                    {issue.element_selector}
-                                  </p>
-                                )}
-                                <p className="text-xs text-gray-600 dark:text-slate-400 leading-relaxed">
-                                  {issue.description}
-                                </p>
-                                {issue.ai_suggestion && (
-                                  <div className="mt-2 bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/20 rounded-lg px-3 py-2">
-                                    <p className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide mb-0.5">Suggested Fix</p>
-                                    <p className="text-xs text-emerald-700 dark:text-emerald-300 font-mono">{issue.ai_suggestion}</p>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
+                {/* Differences are shown in the page-by-page sections below */}
               </div>
             </div>
           );
@@ -1306,11 +1405,14 @@ const RunResults = ({ runId }: RunResultsProps) => {
           <PageSection
             pageName={pageName}
             pageNumber={idx + 1}
-            issues={issuesByPage[pageName] ?? []}
+            issues={(issuesByPage[pageName] ?? []).filter((i) => i.type !== "functional")}
             captures={captures}
           />
         </div>
       ))}
+
+      {/* Functional Tests Section — hidden when functional test was not selected */}
+      {showFunctional && <FunctionalSection items={functionalItems} sectionNum={functionalSectionNum} />}
 
       {/* Accessibility Section — hidden when ADA test was not selected */}
       {showAda && <AccessibilitySection items={accItems} sectionNum={accSectionNum} />}

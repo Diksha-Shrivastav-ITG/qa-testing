@@ -323,50 +323,76 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
     # ── SECTION: Functional Test Results ──
     if functional_tests:
         section_num += 1
-        passed = [ft for ft in functional_tests if ft.status == FunctionalTestStatus.pass_]
-        failed = [ft for ft in functional_tests if ft.status == FunctionalTestStatus.fail]
+        total_passed = sum(1 for ft in functional_tests if ft.status == FunctionalTestStatus.pass_)
+        total_failed = sum(1 for ft in functional_tests if ft.status == FunctionalTestStatus.fail)
 
-        ft_items = ""
-        sub_num = 0
-        if failed:
-            sub_num += 1
-            fail_items = ""
-            for n, ft in enumerate(failed, 1):
-                err = ft.error_message or "Test failed without error details"
-                # Clean up long playwright errors
-                if len(err) > 300:
-                    err = err[:300] + "…"
-                fail_items += f"""
-                <div class="issue-block" style="border-left:4px solid #dc2626;background:#fef2f2;">
-                  <div class="issue-header-row">
-                    <span class="issue-label">Test {section_num}.{sub_num}.{n}</span>
-                    <span class="sev-pill" style="background:#dc2626;">FAILED</span>
+        # Group by page
+        by_page_ft: dict[str, list] = defaultdict(list)
+        for ft in functional_tests:
+            by_page_ft[ft.page or "home"].append(ft)
+
+        ft_sub_html = ""
+        for page, page_fts in by_page_ft.items():
+            page_label = _page_label(page)
+            rows = ""
+            for ft in page_fts:
+                is_pass = ft.status == FunctionalTestStatus.pass_
+                icon = "&#9989;" if is_pass else "&#10060;"
+                status_text = "PASSED" if is_pass else "FAILED"
+                status_color = "#16a34a" if is_pass else "#dc2626"
+                border_color = "#bbf7d0" if is_pass else "#fecaca"
+                bg_color = "#f0fdf4" if is_pass else "#fef2f2"
+
+                sev_html = ""
+                if ft.severity and not is_pass:
+                    sev_c = {"critical": "#dc2626", "major": "#d97706", "minor": "#ca8a04"}.get(ft.severity, "#6b7280")
+                    sev_html = f'<span style="color:#fff;background:{sev_c};padding:1px 6px;border-radius:10px;font-size:0.6rem;font-weight:700;margin-left:6px;">{ft.severity.upper()}</span>'
+
+                # Handle multi-line error messages with expandable details
+                err = ft.error_message or ("Test passed" if is_pass else "Test failed without details")
+                err_lines = err.split("\n")
+                if len(err_lines) <= 1:
+                    desc_html = f'<div style="font-size:0.8rem;color:#4b5563;margin-top:4px;">{_esc(err)}</div>'
+                else:
+                    summary_line = _esc(err_lines[0])
+                    detail_lines = [_esc(l) for l in err_lines[1:] if l.strip()]
+                    detail_items = "".join(f'<div style="padding:2px 0;border-bottom:1px solid #f3f4f6;">{l}</div>' for l in detail_lines)
+                    desc_html = f'''<div style="font-size:0.8rem;color:#4b5563;margin-top:4px;">{summary_line}
+                    <details style="margin-top:4px;">
+                      <summary style="font-size:0.7rem;color:#6366f1;cursor:pointer;font-weight:600;">Show details ({len(detail_lines)} items)</summary>
+                      <div style="max-height:200px;overflow-y:auto;margin-top:4px;padding-left:8px;border-left:2px solid #e0e7ff;font-size:0.75rem;color:#6b7280;">
+                        {detail_items}
+                      </div>
+                    </details></div>'''
+
+                rows += f"""
+                <div style="border:1px solid {border_color};background:{bg_color};border-radius:8px;padding:10px 14px;margin-bottom:8px;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:0.9rem;">{icon}</span>
+                    <span style="font-weight:700;font-size:0.85rem;color:#1f2937;">{_esc(ft.test_name)}</span>
+                    <span style="color:#fff;background:{status_color};padding:1px 8px;border-radius:10px;font-size:0.6rem;font-weight:700;">{status_text}</span>
+                    {sev_html}
                   </div>
-                  <p class="issue-title">{ft.test_name.replace("_", " ").title()}</p>
-                  <ul class="issue-meta">
-                    <li><strong>Error:</strong> {err}</li>
-                    {f'<li><strong>Failed at step:</strong> {ft.step_failed}</li>' if ft.step_failed else ''}
-                    <li><strong>Severity:</strong> {ft.severity or "N/A"}</li>
-                  </ul>
+                  {desc_html}
                 </div>"""
-            ft_items += f"""
-            <div class="subsection">
-              <h3 class="sub-title">{section_num}.{sub_num} Failed Tests ({len(failed)})</h3>
-              {fail_items}
-            </div>"""
-        if passed:
-            sub_num += 1
-            pass_list = "".join(f"<li>✅ {ft.test_name.replace('_',' ').title()}</li>" for ft in passed)
-            ft_items += f"""
-            <div class="subsection">
-              <h3 class="sub-title">{section_num}.{sub_num} Passed Tests ({len(passed)})</h3>
-              <ul class="pass-list">{pass_list}</ul>
+
+            page_passed = sum(1 for ft in page_fts if ft.status == FunctionalTestStatus.pass_)
+            page_failed = sum(1 for ft in page_fts if ft.status != FunctionalTestStatus.pass_)
+            page_badge = f'<span style="color:#fff;background:#16a34a;padding:2px 8px;border-radius:10px;font-size:0.65rem;font-weight:700;margin-left:8px;">{page_passed} passed</span>'
+            if page_failed:
+                page_badge += f'<span style="color:#fff;background:#dc2626;padding:2px 8px;border-radius:10px;font-size:0.65rem;font-weight:700;margin-left:4px;">{page_failed} failed</span>'
+
+            ft_sub_html += f"""
+            <div style="margin-bottom:1.5rem;">
+              <h3 style="font-family:-apple-system,sans-serif;font-size:0.95rem;font-weight:700;color:#374151;margin-bottom:0.75rem;">{page_label}{page_badge}</h3>
+              {rows}
             </div>"""
 
+        failed_badge = f'<span class="count-badge">{total_failed} failed</span>' if total_failed else ''
         sections_html += f"""
         <div class="section">
-          <h2 class="sec-title"><span class="sec-icon">🧪</span>{section_num}. Automated Test Results <span class="count-badge">{len(functional_tests)} tests</span></h2>
-          {ft_items}
+          <h2 class="sec-title"><span class="sec-icon">🧪</span>{section_num}. Functional Tests <span class="count-badge" style="background:#16a34a;">{total_passed} passed</span> {failed_badge}</h2>
+          {ft_sub_html}
         </div>"""
 
     # ── SECTION: ADA / Accessibility ──
@@ -579,11 +605,28 @@ def generate_html_report(db: Session, run_id: int, auto_print: bool = False) -> 
                 if sr.severity and not sr.passed:
                     sev_c = {"critical": "#dc2626", "major": "#d97706", "minor": "#ca8a04"}.get(sr.severity, "#6b7280")
                     sev_html = f'<span style="color:#fff;background:{sev_c};padding:1px 6px;border-radius:10px;font-size:0.6rem;font-weight:700;margin-left:6px;">{sr.severity.upper()}</span>'
+
+                # Handle multi-line values with expandable details
+                val_lines = (sr.value or "").split("\n")
+                if len(val_lines) <= 1:
+                    val_html = _esc(sr.value)
+                else:
+                    summary_line = _esc(val_lines[0])
+                    detail_lines = [_esc(l) for l in val_lines[1:] if l.strip()]
+                    detail_items = "".join(f'<div style="padding:2px 0;border-bottom:1px solid #f3f4f6;">{l}</div>' for l in detail_lines)
+                    val_html = f'''{summary_line}
+                    <details style="margin-top:4px;">
+                      <summary style="font-size:0.7rem;color:#6366f1;cursor:pointer;font-weight:600;">Show details ({len(detail_lines)} items)</summary>
+                      <div style="max-height:250px;overflow-y:auto;margin-top:4px;padding-left:8px;border-left:2px solid #e0e7ff;font-size:0.75rem;color:#6b7280;">
+                        {detail_items}
+                      </div>
+                    </details>'''
+
                 rows += f"""
                 <tr style="border-bottom:1px solid #f3f4f6;">
                   <td style="padding:8px;font-size:0.85rem;">{icon}</td>
                   <td style="padding:8px;font-size:0.85rem;font-weight:600;color:#1f2937;">{_esc(sr.label)}{sev_html}</td>
-                  <td style="padding:8px;font-size:0.8rem;color:#4b5563;">{_esc(sr.value)}</td>
+                  <td style="padding:8px;font-size:0.8rem;color:#4b5563;">{val_html}</td>
                 </tr>
                 {f'<tr><td></td><td colspan="2" style="padding:0 8px 8px;">{rec}</td></tr>' if rec else ''}"""
 
